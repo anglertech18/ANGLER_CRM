@@ -1,0 +1,110 @@
+                                                                                                                                                                                                ↑
+ntext
+
+ md files/schema_update.md asks to bring the UAT database (angler_uat_crm) in line with the development database (crm), since dev is the desired/reference schema. UAT holds real data and must not lose it — no DROP TABLE/TRUNCATE/DELETE, backup first, report before executing.
+
+ Sources used for the comparison (all read-only):
+ - Dev schema: queried live via Prisma against crm (local MySQL, Windows) — information_schema.columns/statistics/key_column_usage.
+ - UAT schema: user-supplied structure-only dump E:\crm\angler_crm\angler_uat_crm.sql (phpMyAdmin export, MariaDB 10.11.14 on Ubuntu 24.04 — case-sensitive table names, unlike dev's Windows MySQL which silently folds table names to lowercase on disk).
+ - Prisma source of truth: server/prisma/schema.prisma.
+
+ User confirmed the target approach for the casing mismatch (see Decision below).
+
+ Key Finding: why UAT's casing "worked" and dev's shouldn't be trusted blindly
+
+ ~52 of ~57 Prisma models have no @@map, so Prisma queries them using the exact PascalCase model name (e.g. PlanOfAction, User, Vertical). UAT's tables already use that exact PascalCase — they are not broken relative to schema.prisma. Dev's tables are lowercase purely because Windows MySQL folds/stores names case-insensitively; Prisma's queries still work there only because Windows matches names case-insensitively.
+
+ Decision (confirmed by user): Add explicit @@map("lowercase_name") to every affected model in schema.prisma, pinning the table name so it's no longer OS-dependent, and rename the corresponding UAT tables to lowercase to match. This achieves "UAT looks like dev" while keeping Prisma functional on UAT's case-sensitive server going forward.
+
+ Follow-up required for production: schema.prisma is shared across all environments. Production (angler_crm) currently has PascalCase tables for these same ~52 models (confirmed via DATABASE_CHANGELOG.md's 2026-07-05 entry, which used PascalCase for Vertical/PaymentType/DailyReport/DailyReportEntry). Once @@map is added, deploying this schema to production without an equivalent rename migration will break production the same way the 2026-07-04 baseline migration incident did. This plan produces a companion prod migration file but does not execute it against production.
+
+ Full Diff Report
+
+ 1. Table casing (52 tables) — rename + @@map
+
+ All match 1:1 by name, only case differs. Full list built from the UAT dump vs information_schema.tables on dev:
+ Activity, ActivityLog, Avatar, BantCategory, BantQuestion, BulkUploadStaging, CallActivityLog, CallLog, CallStatus, CallTracker, City, Collateral, Company, Country, DailyReport, DailyReportEnLeadScore, LeadSource, Partner, PaymentType, Persona, PlanOfAction, PomodoroSession, PricingNegotiationLog, Privilege, Product, SalesStage, SBU, Session, SourceOfDB, State, SwatKeyClosure, atPerformance, User, UserProductTarget, Vertical, WeeklyReport, WeeklyReportDetail → each renamed to its lowercase form (activity, activitylog, … weeklyreportdetail).
+
+ Two implicit many-to-many join tables (_CollateralToLead, _ManagerCompanies) are excluded — Prisma generates these names automatically from model names and they can't take an @@map; leave as-is (harmless, not a real mismatch).
+                                                                                                                                                                                                 ↑
+ 2. Orphaned duplicate tables in UAT (pre-existing bug, already flagged in DATABASE_CHANGELOG.md)
+                                                                                                                                                                                                 ↑
+ UAT currently has both an old, wrongly-cased copy and the new correct lowercase copy for 4 tables, left over from the botched 2026-07-04 baseline migration:
+ - Client_Company (old, has no FK, unused) vs client_company (correct, already @@map'd, in use)
+ - Cashflow_Tracker (old, holds live FK constraints) vs cashflow_tracker (correct, in use, missing all its FKs)                                                                                  ↑
+ - Cashflow_Milestone (old, holds live FK constraint) vs cashflow_milestone (correct, in use, missing its FK)
+ - Lead_Milestone (old, holds live FK constraints) vs lead_milestone (correct, in use, missing its FKs)
+
+ The lowercase versions are the ones Prisma actually queries (@@map already points there), but they're missing every FK constraint dev has. The old PascalCase versions are dead weight but still hold FKs and must not be dropped.
+                                                                                                                                                                                                 ↑
+ Plan: rename the 4 old orphan tables to _deprecated_Client_Company etc. (preserves data, frees nothing else, removes ambiguity), and add the 8 missing FK constraints from dev onto the correct lowercase tables:
+ - cashflow_milestone.cashflow_tracker_id → cashflow_tracker.id (CASCADE/CASCADE)
+ - cashflow_tracker.client_company_id → client_company.id (CASCADE/SET NULL)
+ - cashflow_tracker.executive_id → user.id (CASCADE/RESTRICT)
+ - cashflow_tracker.payment_type_id → paymenttype.id (CASCADE/SET NULL)
+ - cashflow_tracker.product_id → product.id (CASCADE/SET NULL)
+ - cashflow_tracker.vertical_id → vertical.id (CASCADE/SET NULL)
+ - lead_milestone.lead_id → lead.id (CASCADE/CASCADE)
+ - lead_milestone.payment_type_id → paymenttype.id (CASCADE/SET NULL)
+
+ 3. Extra table in UAT not in dev at all                                                                                                                                                         ↑
+
+ - User_old — orphan backup table with its own FKs to Company/SBU. Not in dev, not in schema.prisma. Plan: rename to _deprecated_User_old (data preserved, no functional impact — nothing references it).
+
+ 4. Real column differences (5 tables — genuine drift, not casing)
+
+ - CallActivityLog — missing column action_type (need dev's exact type/nullable/default from schema.prisma)
+ - Enquiry — has an extra column converted_lead that dev doesn't have (need to confirm safe to leave or drop — flagging, not acting, since no DROP without approval)
+ - Lead — missing column salutation
+ - LeadQuadrantHistory — missing column movement_type
+ - User — missing columns role and status
+
+ 5. Column type/precision differences (7 columns)
+
+ - bulkuploadstaging.original_row_data: dev text vs UAT longtext
+ - bulkuploadstaging.mapped_data: dev text vs UAT longtext
+ - bulkuploads
+ - bulkuploadstaging.next_follow_up_date: dev datetime(3) vs UAT datetime                                                                                                                        ↑
+ - lead.quadrant_changed_at: dev datetime(3) vs UAT datetime
+ - lead.enquiry_date: dev datetime(3) vs UAT datetime
+
+ 6. What's already in sync
+
+ The 5 already-applied production migrations (order_won_at, requires_requalification, pipeline_action, Enquiry.call_tracker_id, Product.company_id) are all present in UAT already — good, no action needed there.
+
+ Implementation Steps
+
+ 1. Backup UAT — mysqldump full backup (schema + data) of angler_uat_crm before any change. Must be run on the UAT host (not reachable from here); provide the exact command for the user to run, or run it if given SSH access.
+ 2. Get exact column definitions for the 5 real-diff columns from schema.prisma (type/nullable/default) to write correct ADD COLUMN statements.
+ 3. Write SQL migration database/migrations/20260707_uat_schema_sync.sql containing, in order (all reversible, no drops):
+   - RENAME TABLE statements: 4 orphan renames (Client_Company→_deprecated_Client_Company, etc.) + User_old→_deprecated_User_old, then 52 casing renames (PascalCase → lowercase). MySQL/MariaDB allows a single multi-table RENAME TABLE a TO b, c TO d, ... executed atomically — use that to avoid case-collision ordering issues (rename orphans out of the way first in the same statement).
+   - ALTER TABLE ... ADD CONSTRAINT for the 8 missing FKs.
+   - ALTER TABLE ... ADD COLUMN for the 5 missing columns (action_type, salutation, movement_type, role, status), using IF NOT EXISTS per CLAUDE.md convention where supported, with safe defaults so existing rows aren't broken.
+   - ALTER TABLE ... MODIFY COLUMN for the 7 type/precision fixes.
+   - Leave Enquiry.converted_lead untouched pending user confirmation (flagged, not auto-dropped).
+ 4. Update schema.prisma: add @@map("lowercase_name") to the 52 affected models.
+ 5. Update DATABASE_CHANGELOG.md documenting all of the above per CLAUDE.md rules.
+ 6. Produce (but do not run) a companion production migration doing the same rename + @@map alignment for production, since schema.prisma is shared — needed before this schema.prisma change is ever deployed prod-side. Flag clearly that this is a separate, future-dated deployment step requiring its own backup/review.
+ 7. Clean up scratch analysis files created in the repo root during investigation (dev_columns.json, dev_indexes.json, dev_fks.json, uat_tables.json, schema_diff_report.json) — delete, not commit.
+ 8. Do not execute the SQL — present the migration file and report for review/approval first, per schema_update.md's explicit instruction. Execution is a separate, later step requiring explicit go-ahead.
+
+ Verification (after approval, before/after execution)
+
+ - Confirm backup file exists and is restorable.
+ - Dry-run the rename statements against a copy/staging clone if possible.
+ - After execution: re-run the same diff script (information_schema on UAT vs dev) to confirm zero remaining diffs except the intentionally-deferred converted_lead column.
+ - Run npx prisma validate and npx prisma generate after the schema.prisma edit.
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+
+
+
+
+
+
+
+  Read 1 file
+
+Good — I'll follow the same style, prepending the new entry.
+
+● Update(E:\crm\angler_crm\DATABASE_CHANGELOG.md)

@@ -1,0 +1,11 @@
+/bin
+/logs
+/plugins
+/tests
+/tmp
+/vendor
+/script
+
+# Ignore specific directories
+error.log
+/webroot/
