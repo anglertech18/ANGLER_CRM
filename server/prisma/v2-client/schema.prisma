@@ -1,0 +1,2233 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+generator custom_client {
+  provider      = "prisma-client-js"
+  output        = "./v2-client"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                             Int                            @id @default(autoincrement())
+  email                          String                         @unique(map: "User_email_key")
+  password_hash                  String
+  first_name                     String
+  last_name                      String?
+  role                           Role                           @default(SalesPerson)
+  status                         UserStatus                     @default(INVITED)
+  is_active                      Boolean                        @default(true)
+  joining_date                   DateTime?
+  revenue_target                 Int?                           @default(0)
+  device_target                  Int?                           @default(0)
+  leads_target                   Int?                           @default(0)
+  calls_target                   Int?                           @default(0)
+  activities_target              Int?                           @default(0)
+  q1_target                      Int?                           @default(0)
+  linkedin_target                Int?                           @default(0)
+  demo_target                    Int?                           @default(0)
+  proposal_target                Int?                           @default(0)
+  direct_visit_target            Int?                           @default(0)
+  company_id                     Int?
+  sbu_id                         Int?
+  reporting_manager_id           Int?
+  reset_token                    String?
+  reset_token_expiry             DateTime?
+  department_id                  Int?
+  department                     String                         @default("IM")
+  created_at                     DateTime                       @default(now())
+  updated_at                     DateTime                       @updatedAt
+  cashflow_management_access     Boolean                        @default(false)
+  cashflow_trackers              CashflowTracker[]              @relation("CashflowExecutive")
+  forecast_headers               ForecastHeader[]
+  company                        Company?                       @relation(fields: [company_id], references: [id])
+  department_rel                 Department?                    @relation(fields: [department_id], references: [id])
+  reporting_manager              User?                          @relation("ReportingManager", fields: [reporting_manager_id], references: [id])
+  subordinates                   User[]                         @relation("ReportingManager")
+  sbu                            SBU?                           @relation(fields: [sbu_id], references: [id])
+  privileges                     Privilege[]
+  cashflow_management_companies  CashflowManagementCompany[]
+  managed_companies              CashflowManagementCompany[]    @relation("ManagedCompanies")
+  managed_accounts               RenewalAccount[]               @relation("AccountManagerAccounts")
+  executive_accounts             RenewalAccount[]               @relation("ExecutiveAccounts")
+  call_trackers                  CallTracker[]
+  user_product_targets           UserProductTarget[]
+  leads_owned                    Lead[]                         @relation("LeadOwner")
+  leads_created                  Lead[]                         @relation("LeadCreatedBy")
+  daily_reports                  DailyReport[]
+  partners                       Partner[]
+  poas                           PlanOfAction[]
+  weekly_reports                 WeeklyReport[]
+  created_follow_up_logs         FollowUpLog[]
+  call_logs                      CallLog[]
+  enquiries_created              Enquiry[]                      @relation("EnquiryCreatedBy")
+  enquiries_validated            Enquiry[]                      @relation("EnquiryValidatedBy")
+  enquiries_allocated            Enquiry[]                      @relation("EnquiryAllocatedTo")
+  enquiries_allocated_user       Enquiry[]                      @relation("EnquiryAllocatedToUser")
+  pricing_negotiations           LeadPricingNegotiation[]
+  swat_performances              SwatPerformance[]
+  call_activity_logs             CallActivityLog[]
+  bulk_upload_stagings           BulkUploadStaging[]
+  pricing_negotiation_logs       PricingNegotiationLog[]
+  approved_outboxes              NotificationOutbox[]           @relation("NotificationApprovedBy")
+  renewal_reminders_assigned     RenewalReminder[]              @relation("ReminderAssignee")
+  renewal_reminders_completed    RenewalReminder[]              @relation("ReminderCompleter")
+  renewal_follow_up_logs         RenewalFollowUpLog[]           @relation("FollowUpLogger")
+  follow_up_tasks_assigned       RenewalFollowUpTask[]          @relation("FollowUpTaskAssignee")
+  channel_actions_created        RenewalFollowUpChannelAction[] @relation("ChannelActionCreator")
+  channel_actions_completed      RenewalFollowUpChannelAction[] @relation("ChannelActionCompleter")
+  communication_events_performed RenewalCommunicationEvent[]    @relation("CommunicationActor")
+  renewal_service_assignments    RenewalServiceInstance[]       @relation("ServiceAssignee")
+  renewal_audit_logs             RenewalAuditLog[]              @relation("AuditPerformer")
+
+  @@index([company_id], map: "user_company_id_fkey")
+  @@index([department_id], map: "user_department_id_fkey")
+  @@index([reporting_manager_id], map: "user_reporting_manager_id_fkey")
+  @@index([sbu_id], map: "user_sbu_id_fkey")
+  @@map("user")
+}
+
+model Privilege {
+  id          Int     @id @default(autoincrement())
+  user_id     Int
+  module_name String
+  can_add     Boolean @default(false)
+  can_edit    Boolean @default(false)
+  can_delete  Boolean @default(false)
+  can_view    Boolean @default(false)
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@unique([user_id, module_name], map: "Privilege_user_id_module_name_key")
+  @@map("privilege")
+}
+
+model CashflowManagementCompany {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  company_id Int
+  created_at DateTime @default(now())
+
+  user         User  @relation(fields: [user_id], references: [id])
+  user_managed User? @relation("ManagedCompanies", fields: [user_id], references: [id], map: "fk_managed_company_user")
+
+  @@unique([user_id, company_id], map: "uniq_cashflow_mgmt_user_company")
+  @@map("cashflow_management_company")
+}
+
+model Department {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "Department_name_key")
+  is_active Boolean @default(true)
+  users     User[]
+
+  @@map("department")
+}
+
+model Company {
+  id                         Int                      @id @default(autoincrement())
+  name                       String                   @unique(map: "Company_name_key")
+  is_active                  Boolean                  @default(true)
+  report_recipient_email     String?
+  order_form_template_id     Int?
+  forecast_headers           ForecastHeader[]
+  users                      User[]
+  renewal_accounts           RenewalAccount[]
+  renewal_service_categories RenewalServiceCategory[]
+  renewal_service_masters    RenewalServiceMaster[]
+  products                   Product[]
+  daily_reports              DailyReport[]
+  whatsapp_sessions          WhatsappWebSession[]
+
+  @@map("company")
+}
+
+model SBU {
+  id         Int     @id @default(autoincrement())
+  name       String
+  company_id Int
+  is_active  Boolean @default(true)
+  users      User[]
+  leads      Lead[]
+
+  @@map("sbu")
+}
+
+model JobTitle {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "JobTitle_name_key")
+  is_active Boolean @default(true)
+  leads     Lead[]
+
+  @@map("jobtitle")
+}
+
+model LeadSource {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "LeadSource_name_key")
+  is_active Boolean @default(true)
+
+  leads         Lead[]
+  call_trackers CallTracker[]
+  partners      Partner[]
+  enquiries     Enquiry[]
+
+  @@map("leadsource")
+}
+
+model Industry {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "Industry_name_key")
+  is_active Boolean @default(true)
+
+  leads         Lead[]
+  call_trackers CallTracker[]
+
+  @@map("industry")
+}
+
+model Country {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "Country_name_key")
+  is_active Boolean @default(true)
+
+  leads     Lead[]
+  enquiries Enquiry[]
+
+  @@map("country")
+}
+
+model State {
+  id         Int     @id @default(autoincrement())
+  name       String
+  country_id Int
+  is_active  Boolean @default(true)
+
+  leads     Lead[]
+  enquiries Enquiry[]
+
+  @@map("state")
+}
+
+model City {
+  id        Int     @id @default(autoincrement())
+  name      String
+  state_id  Int
+  is_active Boolean @default(true)
+
+  leads     Lead[]
+  enquiries Enquiry[]
+
+  @@map("city")
+}
+
+model Product {
+  id                    Int                 @id @default(autoincrement())
+  name                  String              @unique(map: "Product_name_key")
+  count_type            String?
+  company_id            Int?
+  is_active             Boolean             @default(true)
+  q4_to_q3_days         Int                 @default(0)
+  q3_to_q2_days         Int                 @default(0)
+  q2_to_q1_days         Int                 @default(0)
+  q1_to_nurturing_days  Int                 @default(0)
+  device_q4_multiplier  Float               @default(1)
+  device_q3_multiplier  Float               @default(1)
+  device_q2_multiplier  Float               @default(1)
+  device_q1_multiplier  Float               @default(1)
+  lead_q4_multiplier    Float               @default(1)
+  lead_q3_multiplier    Float               @default(1)
+  lead_q2_multiplier    Float               @default(1)
+  lead_q1_multiplier    Float               @default(1)
+  lead_multiplier_count Float               @default(1)
+  cashflow_trackers     CashflowTracker[]
+  forecast_headers      ForecastHeader[]
+  company               Company?            @relation(fields: [company_id], references: [id])
+  leads                 Lead[]
+  user_targets          UserProductTarget[]
+  call_trackers         CallTracker[]
+  poas                  PlanOfAction[]
+  enquiries             Enquiry[]
+  swat_performances     SwatPerformance[]
+
+  @@index([company_id], map: "idx_product_company_id")
+  @@map("product")
+}
+
+model EitService {
+  id                 Int     @id @default(autoincrement())
+  name               String  @unique(map: "EitService_name_key")
+  count_type         String?
+  is_active          Boolean @default(true)
+  lead_q1_multiplier Float   @default(1)
+
+  leads Lead[]
+
+  @@map("eitservice")
+}
+
+model ImService {
+  id                 Int     @id @default(autoincrement())
+  name               String  @unique(map: "ImService_name_key")
+  count_type         String?
+  is_active          Boolean @default(true)
+  lead_q1_multiplier Float   @default(1)
+
+  leads_im Lead[] @relation("LeadImService")
+
+  @@map("imservice")
+}
+
+model Persona {
+  id                 Int     @id @default(autoincrement())
+  name               String
+  product_id         Int?
+  is_active          Boolean @default(true)
+  eit_service_id     Int?
+  im_service_id      Int?
+  product_or_service String?
+
+  leads Lead[]
+
+  @@map("persona")
+}
+
+model Collateral {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "Collateral_name_key")
+  url       String?
+  is_active Boolean @default(true)
+
+  leads Lead[]
+
+  @@map("collateral")
+}
+
+model SalesStage {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "SalesStage_name_key")
+  is_active Boolean @default(true)
+
+  leads          Lead[]
+  follow_up_logs FollowUpLog[]
+  enquiries      Enquiry[]
+
+  @@map("salesstage")
+}
+
+model UserProductTarget {
+  id                         Int      @id @default(autoincrement())
+  user_id                    Int
+  product_id                 Int
+  sales_target               Int?     @default(0)
+  revenue_target             Int?     @default(0)
+  device_target              Int?     @default(0)
+  leads_target               Int?     @default(0)
+  calls_target               Int?     @default(0)
+  linkedin_target            Int?     @default(0)
+  direct_visit_target        Int?     @default(0)
+  email_target               Int?     @default(0)
+  linkedin_connection_target Int?     @default(0)
+  proposals_target           Int?     @default(0)
+  demos_target               Int?     @default(0)
+  partner_target             Int?     @default(0)
+  created_at                 DateTime @default(now())
+  updated_at                 DateTime @updatedAt
+  days                       Int?     @default(0)
+
+  user    User    @relation(fields: [user_id], references: [id])
+  product Product @relation(fields: [product_id], references: [id])
+
+  @@unique([user_id, product_id], map: "UserProductTarget_user_id_product_id_key")
+  @@map("userproducttarget")
+}
+
+model Activity {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "Activity_name_key")
+  is_active Boolean @default(true)
+
+  follow_up_logs  FollowUpLog[]
+  leads_next      Lead[]        @relation("LeadNextActivity")
+  follow_up_next  FollowUpLog[] @relation("FollowUpLogNextActivity")
+  leads_follow_up Lead[]        @relation("LeadFollowUpActivity")
+
+  @@map("activity")
+}
+
+model Avatar {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "Avatar_name_key")
+  is_active Boolean @default(true)
+
+  contacts LeadContact[]
+  leads    Lead[]
+
+  @@map("avatar")
+}
+
+model Lead {
+  id                                       Int                           @id @default(autoincrement())
+  created_by_id                            Int
+  sales_sbu_id                             Int?
+  lead_owner_id                            Int?
+  salutation                               Salutation?
+  first_name                               String?
+  last_name                                String?
+  company_id                               Int?
+  job_title_id                             Int?
+  avatar_id                                Int?
+  lead_source_id                           Int?
+  industry_id                              Int?
+  address                                  String?                       @db.Text
+  country_id                               Int?
+  state_id                                 Int?
+  city_id                                  Int?
+  pin_code                                 String?
+  other_info                               String?                       @db.Text
+  annual_turnover                          Decimal?
+  mobile_number                            String?
+  whatsapp_number                          String?
+  email                                    String?
+  website                                  String?
+  product_or_service                       String?
+  product_id                               Int?
+  project_name                             String?                       @db.VarChar(255)
+  eit_service_id                           Int?
+  im_service_id                            Int?
+  persona_id                               Int?
+  where_find_them_id                       Int?
+  telecalling_qualified                    Boolean                       @default(false)
+  device_count                             String?
+  employee_count                           String?
+  vendor_count                             String?
+  branch_unit                              String?
+  license_count                            String?
+  custom_count_type                        String?
+  requirement_desc                         String?                       @db.Text
+  pain_points                              String?                       @db.Text
+  pain_points_files                        String?                       @db.Text
+  demo_completed                           Boolean                       @default(false)
+  pilot_provided                           Boolean                       @default(false)
+  demo_done_authority                      Boolean                       @default(false)
+  post_demo_feedback_sent                  Boolean                       @default(false)
+  post_demo_feedback_received              Boolean                       @default(false)
+  post_demo_feedback_file                  String?
+  probing_discussion_authority             Boolean                       @default(false)
+  direct_visit_authority                   Boolean                       @default(false)
+  pilot_given                              Boolean                       @default(false)
+  mgmt_call_completed                      Boolean                       @default(false)
+  utilized_mgmt_urgency                    Boolean                       @default(false)
+  utilized_presales_timeline               Boolean                       @default(false)
+  authority_champion_influencer_identified Boolean                       @default(false)
+  competitor_details                       String?                       @db.Text
+  opportunities_values                     String?                       @db.Text
+  order_won_attachment                     String?
+  order_value                              Decimal?
+  lead_score                               Int                           @default(0)
+  reduce_cost_score                        Int                           @default(0)
+  efficiency_score                         Int                           @default(0)
+  automation_score                         Int                           @default(0)
+  others_score                             Int                           @default(0)
+  others_score_label                       String?
+  established_need_score                   Int                           @default(0)
+  urgency_score                            Int                           @default(0)
+  budget_allocated_score                   Int                           @default(0)
+  decision_maker_score                     Int                           @default(0)
+  competition_score                        Int                           @default(0)
+  champion_score                           Int                           @default(0)
+  influencer_score                         Int                           @default(0)
+  lead_source_quality                      Int                           @default(0)
+  decision_contact_score                   Int                           @default(0)
+  budget_yes_no                            Boolean                       @default(false)
+  budget_allocated                         String?
+  approval_stage                           String?
+  authority_yes_no                         Boolean                       @default(false)
+  decision_maker                           String?
+  need_yes_no                              Boolean                       @default(false)
+  pain_points_desc                         String?                       @db.Text
+  timeline_yes_no                          Boolean                       @default(false)
+  expected_closure_date                    DateTime?
+  quadrant                                 String?
+  quadrant_updated_at                      DateTime?
+  quadrant_start_date                      DateTime?                     @default(now())
+  last_positive_movement_at                DateTime?                     @default(now())
+  follow_up_activity_id                    Int?
+  follow_up_datetime                       DateTime?
+  sales_stage_id                           Int?
+  next_activity_id                         Int?
+  next_activity_datetime                   DateTime?
+  is_farming                               Boolean                       @default(false)
+  farming_moved_at                         DateTime?
+  call_tracker_id                          Int?                          @unique(map: "Lead_call_tracker_id_key")
+  created_at                               DateTime                      @default(now())
+  updated_at                               DateTime                      @updatedAt
+  compliance_score                         Int                           @default(0)
+  cp_score                                 Int                           @default(0)
+  company_name                             String?
+  sales_device                             Int?
+  quadrant_changed_at                      DateTime?
+  enquiry_date                             DateTime?
+  bant_focus_area                          String?
+  client_company_id                        Int?
+  vertical_id                              Int?
+  requires_requalification                 Boolean                       @default(false)
+  order_won_at                             DateTime?
+  forecast_header                          ForecastHeader?
+  milestones                               LeadMilestone[]
+  product                                  Product?                      @relation(fields: [product_id], references: [id])
+  sales_stage                              SalesStage?                   @relation(fields: [sales_stage_id], references: [id])
+  industry                                 Industry?                     @relation(fields: [industry_id], references: [id])
+  company_master                           ClientCompany?                @relation("LeadCompanyMaster", fields: [client_company_id], references: [id])
+  owner                                    User?                         @relation("LeadOwner", fields: [lead_owner_id], references: [id])
+  created_by                               User                          @relation("LeadCreatedBy", fields: [created_by_id], references: [id])
+  contacts                                 LeadContact[]
+  follow_up_logs                           FollowUpLog[]
+  call_tracker                             CallTracker?                  @relation(fields: [call_tracker_id], references: [id])
+  milestone_payment_histories              LeadMilestonePaymentHistory[]
+  weekly_report_details                    WeeklyReportDetail[]
+  next_activity                            Activity?                     @relation("LeadNextActivity", fields: [next_activity_id], references: [id])
+  eitService                               EitService?                   @relation(fields: [eit_service_id], references: [id])
+  imService                                ImService?                    @relation("LeadImService", fields: [im_service_id], references: [id])
+  collaterals                              Collateral[]
+  country                                  Country?                      @relation(fields: [country_id], references: [id])
+  state                                    State?                        @relation(fields: [state_id], references: [id])
+  city                                     City?                         @relation(fields: [city_id], references: [id])
+  documents                                LeadDocument[]
+  calls                                    CallLog[]
+  score_history                            LeadScore[]
+  quadrant_history                         LeadQuadrantHistory[]
+  job_title                                JobTitle?                     @relation(fields: [job_title_id], references: [id])
+  lead_source                              LeadSource?                   @relation(fields: [lead_source_id], references: [id])
+  sbu                                      SBU?                          @relation(fields: [sales_sbu_id], references: [id])
+  persona                                  Persona?                      @relation(fields: [persona_id], references: [id])
+  pricing_negotiations                     LeadPricingNegotiation[]
+  avatar                                   Avatar?                       @relation(fields: [avatar_id], references: [id])
+  follow_up_activity                       Activity?                     @relation("LeadFollowUpActivity", fields: [follow_up_activity_id], references: [id])
+  where_find_them                          WhereFindThem?                @relation(fields: [where_find_them_id], references: [id])
+  bant_answers                             LeadBantAnswer[]
+
+  @@index([vertical_id], map: "idx_lead_vertical_id")
+  @@map("lead")
+}
+
+model WhereFindThem {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "WhereFindThem_name_key")
+  is_active Boolean @default(true)
+
+  leads Lead[]
+
+  @@map("wherefindthem")
+}
+
+model LeadContact {
+  id             Int     @id @default(autoincrement())
+  lead_id        Int
+  name           String?
+  designation    String?
+  email          String?
+  contact_mobile String?
+  whatsapp       String?
+  avatar_id      Int?
+  persona_id     Int?
+
+  lead   Lead    @relation(fields: [lead_id], references: [id])
+  avatar Avatar? @relation(fields: [avatar_id], references: [id])
+
+  @@map("leadcontact")
+}
+
+model LeadDocument {
+  id               Int      @id @default(autoincrement())
+  lead_id          Int
+  follow_up_log_id Int?
+  name             String?
+  url              String?
+  description      String?
+  uploaded_at      DateTime @default(now())
+
+  lead          Lead         @relation(fields: [lead_id], references: [id])
+  follow_up_log FollowUpLog? @relation(fields: [follow_up_log_id], references: [id])
+
+  @@map("leaddocument")
+}
+
+model FollowUpLog {
+  id               Int       @id @default(autoincrement())
+  lead_id          Int
+  activity_id      Int?
+  date             DateTime?
+  notes            String?   @db.Text
+  created_at       DateTime  @default(now())
+  created_by_id    Int
+  sales_stage_id   Int?
+  next_activity_id Int?
+
+  lead          Lead           @relation(fields: [lead_id], references: [id])
+  activity      Activity?      @relation(fields: [activity_id], references: [id])
+  creator       User           @relation(fields: [created_by_id], references: [id])
+  next_activity Activity?      @relation("FollowUpLogNextActivity", fields: [next_activity_id], references: [id])
+  sales_stage   SalesStage?    @relation(fields: [sales_stage_id], references: [id])
+  documents     LeadDocument[]
+
+  @@map("followuplog")
+}
+
+model LeadQuadrantHistory {
+  id            Int          @id @default(autoincrement())
+  lead_id       Int
+  user_id       Int?
+  old_quadrant  String?
+  new_quadrant  String?
+  movement_type MovementType @default(MANUAL)
+  moved_at      DateTime     @default(now())
+  trigger_days  Int?
+
+  lead Lead @relation(fields: [lead_id], references: [id])
+
+  @@index([old_quadrant, new_quadrant], map: "LeadQuadrantHistory_old_quadrant_new_quadrant_idx")
+  @@index([user_id, moved_at], map: "LeadQuadrantHistory_user_id_moved_at_idx")
+  @@map("leadquadranthistory")
+}
+
+model LeadScore {
+  id         Int      @id @default(autoincrement())
+  lead_id    Int
+  score      Int
+  breakdown  String?  @db.Text
+  updated_by Int
+  updated_at DateTime @default(now())
+
+  lead Lead @relation(fields: [lead_id], references: [id])
+
+  @@map("leadscore")
+}
+
+model LeadPricingNegotiation {
+  id            Int      @id @default(autoincrement())
+  lead_id       Int
+  user_id       Int
+  offered_price Decimal? @db.Decimal(15, 2)
+  remarks       String?  @db.Text
+  created_at    DateTime @default(now())
+
+  lead Lead @relation(fields: [lead_id], references: [id])
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("leadpricingnegotiation")
+}
+
+model CallLog {
+  id            Int       @id @default(autoincrement())
+  lead_id       Int
+  user_id       Int
+  start_time    DateTime
+  end_time      DateTime?
+  duration_sec  Int?
+  outcome       String?
+  notes         String?   @db.Text
+  recording_url String?
+  bant_snapshot String?   @db.Text
+  created_at    DateTime  @default(now())
+
+  lead Lead @relation(fields: [lead_id], references: [id])
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("calllog")
+}
+
+model ActivityLog {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  type       String
+  status     String   @default("Sent")
+  notes      String?  @db.Text
+  created_at DateTime @default(now())
+
+  @@index([user_id, created_at], map: "ActivityLog_user_id_created_at_idx")
+  @@map("activitylog")
+}
+
+model CallActivityLog {
+  id          Int        @id @default(autoincrement())
+  call_id     Int
+  user_id     Int
+  action_type CallAction
+  action_date DateTime   @default(now())
+  created_at  DateTime   @default(now())
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@index([user_id, action_date], map: "CallActivityLog_user_id_action_date_idx")
+  @@map("callactivitylog")
+}
+
+model SwatKeyClosure {
+  id                  Int      @id @default(autoincrement())
+  swat_performance_id Int
+  closure_text        String   @db.Text
+  created_at          DateTime @default(now())
+
+  swat_performance SwatPerformance @relation(fields: [swat_performance_id], references: [id])
+
+  @@map("swatkeyclosure")
+}
+
+model KraEntry {
+  id           Int      @id @default(autoincrement())
+  user_id      Int
+  date         DateTime @db.Date
+  calls_target Int
+  calls_actual Int
+  notes        String?
+
+  @@map("kraentry")
+}
+
+model PomodoroSession {
+  id           Int       @id @default(autoincrement())
+  user_id      Int
+  start_time   DateTime
+  end_time     DateTime?
+  duration_sec Int?
+
+  @@map("pomodorosession")
+}
+
+model PricingNegotiationLog {
+  id         Int      @id @default(autoincrement())
+  lead_id    Int
+  date       DateTime @default(now())
+  details    String?  @db.Text
+  created_by Int
+
+  user User @relation(fields: [created_by], references: [id])
+
+  @@map("pricingnegotiationlog")
+}
+
+model ClientCompany {
+  id                Int               @id @default(autoincrement())
+  name              String            @unique(map: "ClientCompany_name_key")
+  is_active         Boolean           @default(true)
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @updatedAt
+  address           String?           @db.Text
+  city_pincode      String?           @db.VarChar(100)
+  state             String?           @db.VarChar(100)
+  gstin             String?           @db.VarChar(50)
+  phone             String?           @db.VarChar(30)
+  email             String?           @db.VarChar(100)
+  cashflow_trackers CashflowTracker[]
+  renewal_accounts  RenewalAccount[]
+  renewal_contacts  RenewalContact[]
+  leads             Lead[]            @relation("LeadCompanyMaster")
+
+  @@map("client_company")
+}
+
+model Vertical {
+  id                Int               @id @default(autoincrement())
+  name              String            @unique(map: "Vertical_name_key")
+  is_active         Boolean           @default(true)
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @updatedAt
+  cashflow_trackers CashflowTracker[]
+  forecast_headers  ForecastHeader[]
+
+  @@map("vertical")
+}
+
+model PaymentType {
+  id                  Int                 @id @default(autoincrement())
+  name                String              @unique(map: "PaymentType_name_key")
+  is_active           Boolean             @default(true)
+  created_at          DateTime            @default(now())
+  updated_at          DateTime            @updatedAt
+  cashflow_trackers   CashflowTracker[]
+  forecast_milestones ForecastMilestone[]
+  lead_milestones     LeadMilestone[]
+
+  @@map("paymenttype")
+}
+
+model CashflowTracker {
+  id                     Int                 @id @default(autoincrement())
+  executive_id           Int
+  client_company_id      Int?
+  vertical_id            Int?
+  payment_type_id        Int?
+  expected_cashflow      Decimal             @default(0.00) @db.Decimal(15, 2)
+  actual_received        Decimal             @default(0.00) @db.Decimal(15, 2)
+  edc                    DateTime?
+  revised_edc            DateTime?
+  bant_poa               String?
+  notes                  String?             @db.Text
+  created_at             DateTime            @default(now())
+  updated_at             DateTime            @updatedAt
+  product_id             Int?
+  monthly_stretch_target Decimal?            @db.Decimal(15, 2)
+  bant_poa_edc           DateTime?
+  milestones             CashflowMilestone[]
+  client_company         ClientCompany?      @relation(fields: [client_company_id], references: [id])
+  executive              User                @relation("CashflowExecutive", fields: [executive_id], references: [id])
+  payment_type           PaymentType?        @relation(fields: [payment_type_id], references: [id])
+  product                Product?            @relation(fields: [product_id], references: [id])
+  vertical               Vertical?           @relation(fields: [vertical_id], references: [id])
+
+  @@index([client_company_id], map: "cashflow_tracker_client_company_id_fkey")
+  @@index([executive_id], map: "cashflow_tracker_executive_id_fkey")
+  @@index([payment_type_id], map: "cashflow_tracker_payment_type_id_fkey")
+  @@index([product_id], map: "cashflow_tracker_product_fkey")
+  @@index([vertical_id], map: "cashflow_tracker_vertical_id_fkey")
+  @@map("cashflow_tracker")
+}
+
+model CashflowMilestone {
+  id                  Int             @id @default(autoincrement())
+  cashflow_tracker_id Int
+  name                String
+  amount              Decimal         @default(0.00) @db.Decimal(15, 2)
+  received_amount     Decimal         @default(0.00) @db.Decimal(15, 2)
+  status              String          @default("Yet To Start")
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @updatedAt
+  tracker             CashflowTracker @relation(fields: [cashflow_tracker_id], references: [id], onDelete: Cascade)
+
+  @@index([cashflow_tracker_id], map: "cashflow_milestone_cashflow_tracker_id_fkey")
+  @@map("cashflow_milestone")
+}
+
+model LeadMilestone {
+  id                Int                           @id @default(autoincrement())
+  lead_id           Int
+  payment_type_id   Int?
+  percentage        Decimal?                      @db.Decimal(5, 2)
+  expected_amount   Decimal?                      @db.Decimal(15, 2)
+  actual_amount     Decimal?                      @db.Decimal(15, 2)
+  edc               DateTime?
+  revised_edc       DateTime?
+  bant_poa          String?
+  bant_poa_edc      DateTime?
+  poa_status        String                        @default("Pending")
+  collection_status String                        @default("Pending")
+  status            String                        @default("Yet To Start")
+  created_at        DateTime                      @default(now())
+  updated_at        DateTime                      @updatedAt
+  lead              Lead                          @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  payment_type      PaymentType?                  @relation(fields: [payment_type_id], references: [id])
+  payment_histories LeadMilestonePaymentHistory[]
+
+  @@index([lead_id], map: "lead_milestone_lead_id_fkey")
+  @@index([payment_type_id], map: "lead_milestone_payment_type_id_fkey")
+  @@map("lead_milestone")
+}
+
+model LeadMilestonePaymentHistory {
+  id                Int      @id @default(autoincrement())
+  lead_milestone_id Int
+  lead_id           Int
+  collected_amount  Decimal  @db.Decimal(15, 2)
+  collection_date   DateTime @default(now())
+  collected_by_id   Int?
+  remarks           String?  @db.VarChar(255)
+  created_at        DateTime @default(now())
+
+  lead           Lead          @relation(fields: [lead_id], references: [id])
+  lead_milestone LeadMilestone @relation(fields: [lead_milestone_id], references: [id])
+
+  @@index([lead_milestone_id, collection_date])
+  @@index([lead_id, collection_date])
+  @@index([lead_id], map: "lmph_lead_id_fkey")
+  @@index([lead_milestone_id], map: "lmph_lead_milestone_id_fkey")
+  @@map("lead_milestone_payment_history")
+}
+
+model LeadMilestoneBantPoaHistory {
+  id                Int       @id @default(autoincrement())
+  lead_milestone_id Int
+  lead_id           Int
+  bant_poa          String?   @db.Text
+  bant_poa_edc      DateTime?
+  poa_status        String?   @db.VarChar(20)
+  updated_by_id     Int?
+  updated_at        DateTime  @default(now())
+
+  @@index([lead_milestone_id, updated_at])
+  @@index([lead_id, updated_at])
+  @@index([lead_id], map: "lmbph_lead_id_fkey")
+  @@index([lead_milestone_id], map: "lmbph_lead_milestone_id_fkey")
+  @@map("lead_milestone_bant_poa_history")
+}
+
+model ForecastHeader {
+  id                   Int                 @id @default(autoincrement())
+  lead_id              Int                 @unique
+  company_id           Int?
+  product_id           Int?
+  user_id              Int?
+  vertical_id          Int?
+  expected_order_value Decimal             @db.Decimal(15, 2)
+  device_count         Int?
+  remarks              String?             @db.Text
+  status               String              @default("Forecast")
+  created_at           DateTime            @default(now())
+  updated_at           DateTime            @updatedAt
+  company              Company?            @relation(fields: [company_id], references: [id])
+  lead                 Lead                @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  product              Product?            @relation(fields: [product_id], references: [id])
+  user                 User?               @relation(fields: [user_id], references: [id])
+  vertical             Vertical?           @relation(fields: [vertical_id], references: [id])
+  milestones           ForecastMilestone[]
+
+  @@index([company_id], map: "forecast_headers_company_id_fkey")
+  @@index([product_id], map: "forecast_headers_product_id_fkey")
+  @@index([user_id], map: "forecast_headers_user_id_fkey")
+  @@index([vertical_id], map: "forecast_headers_vertical_id_fkey")
+  @@map("forecast_headers")
+}
+
+model ForecastMilestone {
+  id                       Int            @id @default(autoincrement())
+  forecast_id              Int
+  milestone_master_id      Int?
+  expected_amount          Decimal?       @db.Decimal(15, 2)
+  percentage               Decimal?       @db.Decimal(5, 2)
+  expected_collection_date DateTime
+  remarks                  String?        @db.Text
+  status                   String         @default("Upcoming")
+  created_at               DateTime       @default(now())
+  updated_at               DateTime       @updatedAt
+  forecast                 ForecastHeader @relation(fields: [forecast_id], references: [id], onDelete: Cascade)
+  milestone_master         PaymentType?   @relation(fields: [milestone_master_id], references: [id])
+
+  @@index([forecast_id], map: "forecast_milestones_forecast_id_fkey")
+  @@index([milestone_master_id], map: "forecast_milestones_milestone_master_id_fkey")
+  @@map("forecast_milestones")
+}
+
+model SourceOfDB {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "SourceOfDB_name_key")
+  is_active Boolean @default(true)
+
+  call_trackers CallTracker[]
+
+  @@map("sourceofdb")
+}
+
+model CallStatus {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "CallStatus_name_key")
+  is_active Boolean @default(true)
+
+  call_trackers CallTracker[]
+
+  @@map("callstatus")
+}
+
+model CallTracker {
+  id                  Int       @id @default(autoincrement())
+  date                DateTime  @default(now())
+  product_id          Int?
+  industry_id         Int?
+  lead_source_id      Int?
+  source_of_db_id     Int?
+  company_name        String
+  location            String?
+  contact_person_name String?
+  designation         String?
+  email_address       String?
+  personal_email      String?
+  mobile_no           String?
+  business_potential  String?
+  email_status_id     Int?
+  linkedin_sent       Boolean   @default(false)
+  call_status_id      Int?
+  remarks             String?   @db.Text
+  next_follow_up_date DateTime?
+  moved_to_quad       String?
+  pipeline_action     String?
+  quadrant_moved_date DateTime?
+  user_id             Int
+  is_converted        Boolean   @default(false)
+  converted_at        DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+  eit_service_id      Int?
+  im_service_id       Int?
+  product_or_service  String?
+  service_department  String?
+
+  product      Product?     @relation(fields: [product_id], references: [id])
+  industry     Industry?    @relation(fields: [industry_id], references: [id])
+  lead_source  LeadSource?  @relation(fields: [lead_source_id], references: [id])
+  source_of_db SourceOfDB?  @relation(fields: [source_of_db_id], references: [id])
+  call_status  CallStatus?  @relation(fields: [call_status_id], references: [id])
+  email_status EmailStatus? @relation(fields: [email_status_id], references: [id])
+  user         User         @relation(fields: [user_id], references: [id])
+  lead         Lead?
+
+  @@index([lead_source_id], map: "idx_calltracker_lead_source_id")
+  @@map("calltracker")
+}
+
+model EmailStatus {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "EmailStatus_name_key")
+  is_active Boolean @default(true)
+
+  call_trackers CallTracker[]
+
+  @@map("emailstatus")
+}
+
+model SwatPerformance {
+  id                           Int      @id @default(autoincrement())
+  bde_name                     String
+  date                         DateTime @db.Date
+  calls_target                 Int      @default(0)
+  calls_achieved               Int      @default(0)
+  calls_remarks                String?  @db.Text
+  activities_target            Int      @default(0)
+  activities_achieved          Int      @default(0)
+  activities_remarks           String?  @db.Text
+  q1_lead_gen_target           Int      @default(0)
+  q1_lead_gen_achieved         Int      @default(0)
+  q1_lead_gen_remarks          String?  @db.Text
+  q1_to_q2                     Int      @default(0)
+  q2_to_q3                     Int      @default(0)
+  q3_to_q4                     Int      @default(0)
+  q4_to_order                  Int      @default(0)
+  q4_to_q3                     Int      @default(0)
+  q3_to_q2                     Int      @default(0)
+  q2_to_q1                     Int      @default(0)
+  any_to_nurturing             Int      @default(0)
+  linkedin_target              Int      @default(0)
+  linkedin_achieved            Int      @default(0)
+  linkedin_remarks             String?  @db.Text
+  demos_target                 Int      @default(0)
+  demos_achieved               Int      @default(0)
+  demos_remarks                String?  @db.Text
+  proposals_target             Int      @default(0)
+  proposals_achieved           Int      @default(0)
+  proposals_remarks            String?  @db.Text
+  direct_visit_target          Int      @default(0)
+  direct_visit_achieved        Int      @default(0)
+  direct_visit_remarks         String?  @db.Text
+  email_campaign_target        Int      @default(0)
+  email_campaign_achieved      Int      @default(0)
+  email_campaign_remarks       String?  @db.Text
+  linkedin_connection_target   Int      @default(0)
+  linkedin_connection_achieved Int      @default(0)
+  linkedin_connection_remarks  String?  @db.Text
+  user_id                      Int
+  product_id                   Int?
+  performance_percentage       Float    @default(0)
+  created_at                   DateTime @default(now())
+  updated_at                   DateTime @updatedAt
+  service_department           String?
+  revenue_collected_achieved   Int      @default(0)
+  revenue_collected_remarks    String?  @db.Text
+  revenue_collected_target     Int      @default(0)
+  sales_order_won_achieved     Int      @default(0)
+  sales_order_won_remarks      String?  @db.Text
+  sales_order_won_target       Int      @default(0)
+  is_auto_saved                Boolean  @default(false)
+  is_manually_saved            Boolean  @default(false)
+
+  user         User             @relation(fields: [user_id], references: [id])
+  product      Product?         @relation(fields: [product_id], references: [id])
+  key_closures SwatKeyClosure[]
+
+  @@unique([user_id, date, product_id, service_department], map: "SwatPerformance_user_id_date_product_id_service_department_key")
+  @@map("swatperformance")
+}
+
+model BulkUploadStaging {
+  id                      Int       @id @default(autoincrement())
+  user_id                 Int
+  file_name               String?
+  original_row_data       String?   @db.Text
+  mapped_data             String?   @db.Text
+  claimed_by_id           Int?
+  moved_at                DateTime?
+  moved_to_calltracker    Boolean   @default(false)
+  product_id              Int?
+  alternate_mobile_number String?
+  business_potential      String?
+  call_status_id          Int?
+  company_name            String?
+  contact_person_name     String?
+  date                    DateTime?
+  designation             String?
+  email_address           String?
+  email_status_id         Int?
+  industry_id             Int?
+  linkedin_sent           Boolean   @default(false)
+  location                String?
+  mobile_no               String?
+  moved_to_quad           String?
+  next_follow_up_date     DateTime?
+  personal_email          String?
+  remarks                 String?   @db.Text
+  source_of_db_id         Int?
+  has_validation_error    Boolean   @default(false)
+  error_message           String?   @db.Text
+  created_at              DateTime  @default(now())
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@index([email_address], map: "BulkUploadStaging_email_address_idx")
+  @@index([mobile_no], map: "BulkUploadStaging_mobile_no_idx")
+  @@index([moved_to_calltracker], map: "BulkUploadStaging_moved_to_calltracker_idx")
+  @@index([product_id], map: "BulkUploadStaging_product_id_idx")
+  @@index([user_id], map: "BulkUploadStaging_user_id_idx")
+  @@map("bulkuploadstaging")
+}
+
+model Enquiry {
+  id                   Int       @id @default(autoincrement())
+  date                 DateTime  @default(now())
+  lead_source_id       Int?
+  country_id           Int?
+  state_id             Int?
+  city_id              Int?
+  company_name         String?
+  contact_name         String?
+  mobile_number        String?
+  email                String?
+  requirement          String?   @db.Text
+  lead_qualification   String?
+  validated_by_id      Int?
+  allocated_to_id      Int?
+  product_id           Int?
+  linkedin_status      String?
+  sales_stage_id       Int?
+  remarks              String?   @db.Text
+  frequency            String?
+  name                 String?
+  mktg_effectiveness   String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+  converted_at         DateTime?
+  is_converted         Boolean   @default(false)
+  converted_to         String?
+  service_department   String?
+  created_by_id        Int?
+  enquiry_allocated_to Int?
+  converted_lead_id    Int?
+  call_tracker_id      Int?      @unique(map: "idx_enquiry_call_tracker_id")
+
+  lead_source               LeadSource? @relation(fields: [lead_source_id], references: [id])
+  country                   Country?    @relation(fields: [country_id], references: [id])
+  state                     State?      @relation(fields: [state_id], references: [id])
+  city                      City?       @relation(fields: [city_id], references: [id])
+  created_by                User?       @relation("EnquiryCreatedBy", fields: [created_by_id], references: [id])
+  validated_by              User?       @relation("EnquiryValidatedBy", fields: [validated_by_id], references: [id])
+  allocated_to              User?       @relation("EnquiryAllocatedTo", fields: [allocated_to_id], references: [id])
+  enquiry_allocated_to_user User?       @relation("EnquiryAllocatedToUser", fields: [enquiry_allocated_to], references: [id])
+  product                   Product?    @relation(fields: [product_id], references: [id])
+  sales_stage               SalesStage? @relation(fields: [sales_stage_id], references: [id])
+
+  @@map("enquiry")
+}
+
+model Session {
+  id        String   @id
+  sid       String   @unique(map: "Session_sid_key")
+  data      String   @db.Text
+  expiresAt DateTime
+
+  @@map("session")
+}
+
+model WeeklyReport {
+  id                 Int      @id @default(autoincrement())
+  date               DateTime @db.Date
+  user_id            Int
+  product_id         Int?
+  service_department String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  user    User                 @relation(fields: [user_id], references: [id])
+  details WeeklyReportDetail[]
+
+  @@map("weeklyreport")
+}
+
+model WeeklyReportDetail {
+  id               Int     @id @default(autoincrement())
+  weekly_report_id Int
+  type             String
+  metric           String
+  lead_id          Int?
+  value            String? @db.Text
+
+  weekly_report WeeklyReport @relation(fields: [weekly_report_id], references: [id])
+  lead          Lead?        @relation(fields: [lead_id], references: [id])
+
+  @@index([weekly_report_id, type, metric], map: "WeeklyReportDetail_weekly_report_id_type_metric_idx")
+  @@map("weeklyreportdetail")
+}
+
+model PlanOfAction {
+  id                 Int       @id @default(autoincrement())
+  user_id            Int
+  product_id         Int?
+  service_department String?
+  date_of_meeting    DateTime  @db.Date
+  poa_description    String    @db.Text
+  responsibility     String
+  edc                DateTime? @db.Date
+  revised_edc        DateTime? @db.Date
+  status             String    @default("Pending")
+  adc                DateTime? @db.Date
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  product Product? @relation(fields: [product_id], references: [id])
+  user    User     @relation(fields: [user_id], references: [id])
+
+  @@map("planofaction")
+}
+
+model Partner {
+  id                             Int       @id @default(autoincrement())
+  user_id                        Int
+  reg_date                       DateTime  @default(now())
+  partner_company                String?
+  name                           String
+  region                         String?
+  enquiry_interest_date          DateTime?
+  quadrant_allotted_date         DateTime?
+  current_lead_score             Int?      @default(0)
+  quadrant                       String?
+  partner_type                   String?
+  current_end_client_opportunity String?
+  source_id                      Int?
+  partner_action_poa             String?   @db.Text
+  edc                            DateTime?
+  active_leads_moved_to_quadrant Int?      @default(0)
+  status                         String    @default("Active")
+  signed_date                    DateTime? @db.Date
+  created_at                     DateTime  @default(now())
+  updated_at                     DateTime  @updatedAt
+  business_plan_target_value     Int?      @default(0)
+  is_business_plan_submitted     Boolean   @default(false)
+  is_business_plan_target_agreed Boolean   @default(false)
+  is_monthly_engagement_started  Boolean   @default(false)
+  is_rfi_received                Boolean   @default(false)
+
+  user                 User        @relation(fields: [user_id], references: [id])
+  lead_source          LeadSource? @relation(fields: [source_id], references: [id])
+  is_training_provided Boolean     @default(false)
+  product_id           Int?
+
+  @@map("partner")
+}
+
+model BantCategory {
+  id         Int      @id @default(autoincrement())
+  code       String   @unique(map: "BantCategory_code_key") @db.VarChar(10)
+  name       String   @db.VarChar(100)
+  status     String   @default("active") @db.VarChar(20)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  questions    BantQuestion[]
+  bant_answers LeadBantAnswer[]
+
+  @@map("bantcategory")
+}
+
+model BantQuestion {
+  id          Int      @id @default(autoincrement())
+  category_id Int
+  question    String   @db.Text
+  sort_order  Int      @default(0)
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  category     BantCategory     @relation(fields: [category_id], references: [id])
+  bant_answers LeadBantAnswer[]
+
+  @@index([category_id], map: "BantQuestion_category_id_fkey")
+  @@map("bantquestion")
+}
+
+model LeadBantAnswer {
+  id          Int @id @default(autoincrement())
+  lead_id     Int
+  category_id Int
+  question_id Int
+
+  category   BantCategory @relation(fields: [category_id], references: [id])
+  question   BantQuestion @relation(fields: [question_id], references: [id])
+  lead       Lead         @relation(fields: [lead_id], references: [id])
+  answer     String?      @db.Text
+  created_by Int?
+  created_at DateTime     @default(now())
+  updated_at DateTime     @updatedAt
+
+  @@unique([lead_id, question_id], map: "LeadBantAnswer_lead_id_question_id_key")
+  @@map("leadbantanswer")
+}
+
+model DailyReport {
+  id              Int       @id @default(autoincrement())
+  report_date     DateTime  @db.Date
+  user_id         Int
+  company_id      Int
+  recipient_email String
+  subject         String
+  email_html      String    @db.LongText
+  status          String    @default("generated")
+  error_message   String?   @db.Text
+  sent_at         DateTime?
+  created_at      DateTime  @default(now())
+
+  user     User                 @relation(fields: [user_id], references: [id])
+  company  Company              @relation(fields: [company_id], references: [id])
+  products DailyReportProduct[]
+
+  @@unique([user_id, report_date], map: "uniq_dailyreport_user_date")
+  @@map("dailyreport")
+}
+
+model DailyReportProduct {
+  id              Int    @id @default(autoincrement())
+  daily_report_id Int
+  product_id      Int
+  product_name    String
+
+  daily_report DailyReport             @relation(fields: [daily_report_id], references: [id])
+  leads        DailyReportLead[]
+  swat_metrics DailyReportSwatMetric[]
+
+  @@map("dailyreportproduct")
+}
+
+model DailyReportLead {
+  id                      Int     @id @default(autoincrement())
+  daily_report_product_id Int
+  lead_id                 Int?
+  lead_name               String
+  quadrant                String?
+  follow_up_notes         String  @db.Text
+
+  daily_report_product DailyReportProduct @relation(fields: [daily_report_product_id], references: [id])
+
+  @@map("dailyreportlead")
+}
+
+model DailyReportSwatMetric {
+  id                      Int    @id @default(autoincrement())
+  daily_report_product_id Int
+  category                String
+  target                  Int    @default(0)
+  achieved                Int    @default(0)
+
+  daily_report_product DailyReportProduct @relation(fields: [daily_report_product_id], references: [id])
+
+  @@map("dailyreportswatmetric")
+}
+
+model RenewalServiceCategory {
+  id         Int      @id @default(autoincrement())
+  name       String
+  code       String
+  color      String?  @default("#6366f1")
+  sort_order Int      @default(0)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+  parent_id  Int?
+  company_id Int?
+
+  parent                RenewalServiceCategory?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children              RenewalServiceCategory[] @relation("CategoryHierarchy")
+  company               Company?                 @relation(fields: [company_id], references: [id])
+  services              RenewalServiceMaster[]   @relation("ServiceMasterCategory")
+  sub_category_services RenewalServiceMaster[]   @relation("ServiceMasterSubCategory")
+  policies              RenewalReminderPolicy[]
+
+  @@unique([company_id, code])
+  @@index([company_id])
+  @@index([company_id, name])
+  @@map("renewal_service_category")
+}
+
+model RenewalServiceMaster {
+  id                         Int      @id @default(autoincrement())
+  name                       String
+  category_id                Int
+  identifier_label           String?  @default("Identifier")
+  requires_identifier        Boolean  @default(true)
+  supports_provider          Boolean  @default(true)
+  requires_provider          Boolean  @default(false)
+  supports_server_name       Boolean  @default(true)
+  requires_server_name       Boolean  @default(false)
+  supports_plan_name         Boolean  @default(true)
+  requires_plan_name         Boolean  @default(false)
+  supports_login_username    Boolean  @default(false)
+  requires_login_username    Boolean  @default(false)
+  supports_quantity          Boolean  @default(false)
+  requires_quantity          Boolean  @default(false)
+  quantity_label             String? // "No. of Email IDs", "No. of Vehicles", etc.
+  default_duration_value     Int?     @default(12)
+  default_duration_unit      String?  @default("months")
+  supports_amc               Boolean  @default(false)
+  supports_support_package   Boolean  @default(false)
+  default_reminder_policy_id Int?
+  is_active                  Boolean  @default(true)
+  sort_order                 Int      @default(0)
+  created_at                 DateTime @default(now())
+  updated_at                 DateTime @default(now()) @updatedAt
+  sub_category_id            Int?
+  company_id                 Int?
+
+  company         Company?                 @relation(fields: [company_id], references: [id])
+  category        RenewalServiceCategory   @relation("ServiceMasterCategory", fields: [category_id], references: [id])
+  sub_category    RenewalServiceCategory?  @relation("ServiceMasterSubCategory", fields: [sub_category_id], references: [id], onDelete: SetNull)
+  default_policy  RenewalReminderPolicy?   @relation("DefaultServicePolicy", fields: [default_reminder_policy_id], references: [id])
+  instances       RenewalServiceInstance[]
+  policies        RenewalReminderPolicy[]  @relation("PolicyForService")
+  default_prices  RenewalServicePrice[]
+  customer_prices RenewalCustomerPrice[]
+
+  @@index([company_id])
+  @@index([company_id, name])
+  @@map("renewal_service_master")
+}
+
+model RenewalProvider {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  category_code String?
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  service_instances RenewalServiceInstance[]
+
+  @@map("renewal_provider")
+}
+
+model RenewalProviderSubItem {
+  id          Int      @id @default(autoincrement())
+  provider_id Int
+  name        String
+  type        String   @default("SERVER")
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+
+  @@index([provider_id])
+  @@map("renewal_provider_sub_item")
+}
+
+model RenewalServicePlanMaster {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique(map: "name")
+  category_code String?  @default("SERVER")
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+
+  @@map("renewal_service_plan_master")
+}
+
+model RenewalContact {
+  id                   Int      @id @default(autoincrement())
+  client_company_id    Int
+  name                 String
+  designation          String?
+  department           String?
+  email                String?
+  mobile               String?
+  whatsapp             String?
+  role                 String?
+  is_primary           Boolean  @default(false)
+  is_renewal_contact   Boolean  @default(true)
+  whatsapp_consent     Boolean  @default(false)
+  is_active            Boolean  @default(true)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @default(now()) @updatedAt
+  address              String?  @db.Text
+  city_pincode         String?  @db.VarChar(100)
+  state                String?  @db.VarChar(100)
+  gstin                String?  @db.VarChar(50)
+  email_consent        Boolean  @default(true)
+  phone_consent        Boolean  @default(true)
+  use_default_template Boolean  @default(false)
+
+  client_company    ClientCompany                  @relation(fields: [client_company_id], references: [id])
+  account_contacts  RenewalAccountContact[]
+  service_instances RenewalServiceInstance[]
+  channel_actions   RenewalFollowUpChannelAction[]
+
+  @@index([client_company_id])
+  @@map("renewal_contact")
+}
+
+model RenewalAccount {
+  id                   Int       @id @default(autoincrement())
+  company_id           Int?
+  client_company_id    Int
+  account_manager_id   Int?
+  renewal_executive_id Int?
+  order_number         String?
+  order_date           DateTime?
+  po_reference         String?
+  invoice_number       String?
+  invoice_date         DateTime?
+  notes                String?   @db.Text
+  status               String    @default("DRAFT")
+  source_lead_id       Int?
+  created_by_id        Int
+  is_active            Boolean   @default(true)
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now()) @updatedAt
+
+  company              Company?                       @relation(fields: [company_id], references: [id])
+  client_company       ClientCompany                  @relation(fields: [client_company_id], references: [id])
+  account_manager      User?                          @relation("AccountManagerAccounts", fields: [account_manager_id], references: [id])
+  renewal_executive    User?                          @relation("ExecutiveAccounts", fields: [renewal_executive_id], references: [id])
+  services             RenewalServiceInstance[]
+  contacts             RenewalAccountContact[]
+  documents            RenewalDocument[]
+  audit_logs           RenewalAuditLog[]
+  follow_up_tasks      RenewalFollowUpTask[]
+  channel_actions      RenewalFollowUpChannelAction[]
+  communication_events RenewalCommunicationEvent[]
+
+  @@index([client_company_id])
+  @@index([account_manager_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("renewal_account")
+}
+
+model RenewalAccountContact {
+  id                 Int @id @default(autoincrement())
+  renewal_account_id Int
+  contact_id         Int
+
+  renewal_account RenewalAccount @relation(fields: [renewal_account_id], references: [id], onDelete: Cascade)
+  contact         RenewalContact @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+
+  @@unique([renewal_account_id, contact_id])
+  @@map("renewal_account_contact")
+}
+
+model RenewalServiceInstance {
+  id                       Int       @id @default(autoincrement())
+  renewal_account_id       Int
+  service_master_id        Int
+  identifier               String?
+  provider_id              Int?
+  quantity                 Int       @default(1)
+  activation_date          DateTime?
+  expiry_date              DateTime?
+  actual_expiry_date       DateTime?
+  duration_value           Int?      @default(12)
+  duration_unit            String?   @default("months")
+  amount_due               Decimal   @default(0.00) @db.Decimal(12, 2)
+  amc_amount               Decimal   @default(0.00) @db.Decimal(12, 2)
+  support_amount           Decimal   @default(0.00) @db.Decimal(12, 2)
+  assigned_user_id         Int?
+  customer_contact_id      Int?
+  reminder_policy_id       Int?
+  override_policy          Boolean   @default(false)
+  status                   String    @default("ACTIVE")
+  remarks                  String?   @db.Text
+  is_active                Boolean   @default(true)
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @default(now()) @updatedAt
+  email_count              Int?
+  provider_type            String?
+  server_name              String?
+  plan_name                String?
+  billing_term             String?   @default("Yearly")
+  unit_price               Decimal?  @default(0.00) @db.Decimal(12, 2)
+  login_username           String? // New field for ANGLER requirement
+  service_transaction_type String? // REGISTRATION | RENEWAL - distinct from lifecycle status
+  order_number             String?   @db.VarChar(100)
+  order_date               DateTime?
+  po_reference             String?   @db.VarChar(200)
+  invoice_number           String?   @db.VarChar(100)
+  invoice_date             DateTime?
+
+  renewal_account      RenewalAccount             @relation(fields: [renewal_account_id], references: [id], onDelete: Cascade)
+  service_master       RenewalServiceMaster       @relation(fields: [service_master_id], references: [id])
+  provider             RenewalProvider?           @relation(fields: [provider_id], references: [id])
+  customer_contact     RenewalContact?            @relation(fields: [customer_contact_id], references: [id])
+  reminder_policy      RenewalReminderPolicy?     @relation(fields: [reminder_policy_id], references: [id])
+  cycles               RenewalCycle[]
+  follow_up_logs       RenewalFollowUpLog[]
+  instance_alert_steps RenewalInstanceAlertStep[]
+
+  assigned_user        User?                          @relation("ServiceAssignee", fields: [assigned_user_id], references: [id])
+  follow_up_tasks      RenewalFollowUpTask[]
+  channel_actions      RenewalFollowUpChannelAction[]
+  communication_events RenewalCommunicationEvent[]
+
+  @@index([renewal_account_id])
+  @@index([order_number])
+  @@index([expiry_date])
+  @@index([status])
+  @@index([assigned_user_id])
+  @@map("renewal_service_instance")
+}
+
+model RenewalCycle {
+  id                       Int       @id @default(autoincrement())
+  service_instance_id      Int
+  cycle_number             Int       @default(1)
+  activation_date          DateTime?
+  expiry_date              DateTime?
+  amount_due               Decimal   @default(0.00) @db.Decimal(12, 2)
+  amount_collected         Decimal   @default(0.00) @db.Decimal(12, 2)
+  outstanding              Decimal   @default(0.00) @db.Decimal(12, 2)
+  status                   String    @default("ACTIVE")
+  renewed_at               DateTime?
+  renewed_by_id            Int?
+  is_active                Boolean   @default(true)
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @default(now()) @updatedAt
+  reminder_policy_snapshot String?   @db.LongText
+  not_renewing_reason      String?   @db.Text
+
+  service_instance     RenewalServiceInstance         @relation(fields: [service_instance_id], references: [id], onDelete: Cascade)
+  reminders            RenewalReminder[]
+  payments             RenewalPayment[]
+  follow_up_tasks      RenewalFollowUpTask[]
+  channel_actions      RenewalFollowUpChannelAction[]
+  communication_events RenewalCommunicationEvent[]
+
+  @@index([service_instance_id, status])
+  @@index([expiry_date])
+  @@map("renewal_cycle")
+}
+
+model RenewalReminder {
+  id                    Int       @id @default(autoincrement())
+  cycle_id              Int
+  step_number           Int
+  offset_days           Int
+  due_date              DateTime
+  action_type           String
+  channel               String
+  recipient_type        String
+  assigned_user_id      Int?
+  template_id           Int?
+  status                String    @default("PENDING")
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @default(now()) @updatedAt
+  completed_at          DateTime?
+  completed_by_id       Int?
+  skipped_at            DateTime?
+  skip_reason           String?   @db.VarChar(500)
+  policy_version        Int?
+  is_mandatory          Boolean   @default(false)
+  escalation_after_days Int?
+  escalate_to_id        Int?
+  escalated             Boolean   @default(false)
+  escalated_at          DateTime?
+
+  cycle                RenewalCycle                   @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  follow_up_logs       RenewalFollowUpLog[]
+  assigned_user        User?                          @relation("ReminderAssignee", fields: [assigned_user_id], references: [id])
+  completed_by         User?                          @relation("ReminderCompleter", fields: [completed_by_id], references: [id])
+  template             RenewalNotificationTemplate?   @relation(fields: [template_id], references: [id])
+  channel_actions      RenewalFollowUpChannelAction[]
+  communication_events RenewalCommunicationEvent[]
+
+  @@index([due_date, status])
+  @@index([assigned_user_id, status])
+  @@index([cycle_id])
+  @@map("renewal_reminder")
+}
+
+model RenewalFollowUpLog {
+  id                  Int       @id @default(autoincrement())
+  service_instance_id Int
+  reminder_id         Int?
+  outcome_code        String?
+  contacted           Boolean   @default(false)
+  notes               String?   @db.Text
+  customer_response   String?   @db.Text
+  next_follow_up_date DateTime?
+  logged_by_id        Int
+  logged_at           DateTime  @default(now())
+
+  service_instance RenewalServiceInstance @relation(fields: [service_instance_id], references: [id], onDelete: Cascade)
+  reminder         RenewalReminder?       @relation(fields: [reminder_id], references: [id])
+  logged_by        User                   @relation("FollowUpLogger", fields: [logged_by_id], references: [id])
+
+  @@index([service_instance_id])
+  @@index([logged_at])
+  @@map("renewal_followup_log")
+}
+
+model RenewalReminderPolicy {
+  id                  Int      @id @default(autoincrement())
+  name                String
+  company_id          Int?
+  service_category_id Int?
+  service_master_id   Int?
+  is_default          Boolean  @default(false)
+  use_business_days   Boolean  @default(false)
+  skip_weekends       Boolean  @default(false)
+  timezone            String   @default("Asia/Kolkata")
+  version             Int      @default(1)
+  is_active           Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @default(now()) @updatedAt
+
+  category             RenewalServiceCategory?  @relation(fields: [service_category_id], references: [id])
+  service_masters      RenewalServiceMaster[]   @relation("PolicyForService")
+  default_for_services RenewalServiceMaster[]   @relation("DefaultServicePolicy")
+  service_instances    RenewalServiceInstance[]
+  steps                RenewalReminderStep[]
+
+  @@map("renewal_reminder_policy")
+}
+
+model RenewalPolicyVersion {
+  id                      Int      @id @default(autoincrement())
+  policy_id               Int
+  version                 Int
+  name_snapshot           String
+  steps_snapshot          String   @db.Text
+  change_summary          String?  @db.VarChar(500)
+  changed_by_id           Int?
+  change_reason           String?  @db.VarChar(500)
+  affected_services_count Int      @default(0)
+  created_at              DateTime @default(now())
+
+  @@unique([policy_id, version])
+  @@map("renewal_policy_version")
+}
+
+model RenewalReminderStep {
+  id                  Int                   @id @default(autoincrement())
+  policy_id           Int
+  step_number         Int
+  offset_days         Int
+  relative_to         String                @default("EXPIRY_DATE")
+  action_type         String
+  channel             String
+  recipient_type      String
+  template_id         Int?
+  escalate_after_days Int?
+  escalate_to         String?               @db.VarChar(100)
+  is_mandatory        Boolean               @default(false)
+  is_enabled          Boolean               @default(true)
+  created_at          DateTime              @default(now())
+  updated_at          DateTime              @default(now()) @updatedAt
+  attach_order_form   Boolean               @default(false)
+  policy              RenewalReminderPolicy @relation(fields: [policy_id], references: [id], onDelete: Cascade)
+
+  @@unique([policy_id, step_number])
+  @@map("renewal_reminder_step")
+}
+
+model RenewalNotificationTemplate {
+  id               Int      @id @default(autoincrement())
+  name             String
+  category_code    String?  @db.VarChar(20)
+  channel          String
+  subject          String?
+  body_html        String   @db.Text
+  body_text        String?  @db.Text
+  variables        String?  @db.LongText
+  version          Int      @default(1)
+  editor_json      String?  @db.LongText
+  compiled_html    String?  @db.LongText
+  brand_profile_id Int?
+  is_published     Boolean  @default(false)
+  is_active        Boolean  @default(true)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now()) @updatedAt
+
+  brand_profile   RenewalBrandProfile?           @relation(fields: [brand_profile_id], references: [id])
+  reminders       RenewalReminder[]
+  channel_actions RenewalFollowUpChannelAction[]
+
+  @@index([brand_profile_id])
+  @@map("renewal_notification_template")
+}
+
+model RenewalTemplateVersion {
+  id               Int      @id @default(autoincrement())
+  template_id      Int
+  version          Int
+  subject_snapshot String?
+  change_summary   String?  @db.VarChar(500)
+  changed_by_id    Int?
+  change_reason    String?  @db.VarChar(500)
+  created_at       DateTime @default(now())
+  name_snapshot    String
+  body_snapshot    String   @db.Text
+
+  @@unique([template_id, version])
+  @@map("renewal_template_version")
+}
+
+model RenewalServicePrice {
+  id                Int       @id @default(autoincrement())
+  service_master_id Int
+  base_price        Decimal   @default(0.00) @db.Decimal(12, 2)
+  billing_unit      String    @default("year") @db.VarChar(20)
+  currency          String    @default("INR") @db.VarChar(5)
+  effective_from    DateTime  @db.Date
+  effective_to      DateTime? @db.Date
+  is_current        Boolean   @default(true)
+  notes             String?   @db.Text
+  created_by_id     Int?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  service_master RenewalServiceMaster @relation(fields: [service_master_id], references: [id])
+
+  @@index([service_master_id, is_current])
+  @@map("renewal_service_price")
+}
+
+model RenewalCustomerPrice {
+  id                Int       @id @default(autoincrement())
+  client_company_id Int
+  service_master_id Int
+  override_price    Decimal   @db.Decimal(12, 2)
+  billing_unit      String    @default("year") @db.VarChar(20)
+  currency          String    @default("INR") @db.VarChar(5)
+  effective_from    DateTime  @db.Date
+  effective_to      DateTime? @db.Date
+  is_active         Boolean   @default(true)
+  notes             String?   @db.Text
+  approved_by_id    Int?
+  created_by_id     Int?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  service_master RenewalServiceMaster @relation(fields: [service_master_id], references: [id])
+
+  @@index([client_company_id, service_master_id, is_active])
+  @@index([effective_from, effective_to])
+  @@map("renewal_customer_price")
+}
+
+model RenewalInstanceAlertStep {
+  id                  Int      @id @default(autoincrement())
+  service_instance_id Int
+  step_number         Int      @default(1)
+  days_before         Int
+  channel             String   @db.VarChar(30)
+  email_template_id   Int?
+  is_active           Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  service_instance RenewalServiceInstance @relation(fields: [service_instance_id], references: [id], onDelete: Cascade)
+
+  @@unique([service_instance_id, step_number])
+  @@index([service_instance_id])
+  @@map("renewal_instance_alert_step")
+}
+
+model RenewalBrandProfile {
+  id                Int      @id @default(autoincrement())
+  company_id        Int?
+  profile_name      String   @default("Default")
+  company_name      String?  @db.VarChar(200)
+  logo_url          String?  @db.VarChar(500)
+  alt_logo_url      String?  @db.VarChar(500)
+  primary_color     String?  @default("#074388") @db.VarChar(7)
+  secondary_color   String?  @default("#0ea5e9") @db.VarChar(7)
+  sender_name       String?  @default("Angler iTech Solutions")
+  sender_email      String?  @db.VarChar(300)
+  reply_to_email    String?  @db.VarChar(300)
+  phone             String?  @db.VarChar(50)
+  website_url       String?  @db.VarChar(300)
+  email_footer      String?  @db.LongText
+  bank_name         String?  @db.VarChar(200)
+  bank_account_no   String?  @db.VarChar(100)
+  bank_branch       String?  @db.VarChar(200)
+  bank_ifsc         String?  @db.VarChar(50)
+  bank_account_name String?  @db.VarChar(200)
+  is_default        Boolean  @default(false)
+  is_active         Boolean  @default(true)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now()) @updatedAt
+
+  templates RenewalNotificationTemplate[]
+
+  @@index([company_id])
+  @@map("renewal_brand_profile")
+}
+
+model RenewalPayment {
+  id              Int      @id @default(autoincrement())
+  cycle_id        Int
+  amount          Decimal  @db.Decimal(12, 2)
+  payment_date    DateTime
+  collected_by_id Int?
+  payment_mode    String?  @db.VarChar(50)
+  reference       String?  @db.VarChar(200)
+  remarks         String?  @db.Text
+  created_at      DateTime @default(now())
+
+  cycle RenewalCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+
+  @@index([cycle_id])
+  @@map("renewal_payment")
+}
+
+model RenewalDocument {
+  id                 Int      @id @default(autoincrement())
+  renewal_account_id Int
+  document_type      String?  @db.VarChar(50)
+  name               String?
+  url                String
+  uploaded_by_id     Int?
+  uploaded_at        DateTime @default(now())
+
+  account RenewalAccount @relation(fields: [renewal_account_id], references: [id], onDelete: Cascade)
+
+  @@index([renewal_account_id])
+  @@map("renewal_document")
+}
+
+model ApplicationNotification {
+  id          Int       @id @default(autoincrement())
+  user_id     Int
+  reminder_id Int?
+  type        String    @db.VarChar(50)
+  title       String    @db.VarChar(300)
+  body        String    @db.Text
+  link        String?   @db.VarChar(500)
+  is_read     Boolean   @default(false)
+  read_at     DateTime?
+  created_at  DateTime  @default(now())
+
+  @@index([user_id, is_read])
+  @@index([user_id, created_at])
+  @@map("application_notification")
+}
+
+model NotificationOutbox {
+  id                        Int       @id @default(autoincrement())
+  channel                   String    @db.VarChar(20)
+  recipient                 String    @db.VarChar(300)
+  cc_recipients             String?   @db.VarChar(500)
+  recipient_name            String?   @db.VarChar(200)
+  template_id               Int?
+  subject                   String?   @db.VarChar(500)
+  rendered_body             String    @db.Text
+  status                    String    @default("QUEUED")
+  attempt_count             Int       @default(0)
+  next_retry_at             DateTime?
+  sent_at                   DateTime?
+  provider_ref              String?   @db.VarChar(200)
+  error_message             String?   @db.Text
+  requires_approval         Boolean   @default(false)
+  approved_by_id            Int?
+  approved_at               DateTime?
+  mapping_context           String?   @db.LongText
+  attachment_path           String?   @db.VarChar(500)
+  session_phone             String?   @db.VarChar(30)
+  channel_action_id         Int?
+  follow_up_task_id         Int?
+  execution_mode            String?   @db.VarChar(50)
+  communication_purpose     String?   @db.VarChar(50)
+  idempotency_key           String?   @unique(map: "notification_outbox_idempotency_key_key") @db.VarChar(200)
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @updatedAt
+  digest_channel_action_ids String?   @db.Text
+  delivery_status           String?   @db.VarChar(50)
+  delivery_timestamp        DateTime?
+  read_timestamp            DateTime?
+  bounce_type               String?   @db.VarChar(50)
+
+  approved_by          User?                         @relation("NotificationApprovedBy", fields: [approved_by_id], references: [id])
+  channel_action       RenewalFollowUpChannelAction? @relation("ChannelActionOutbox", fields: [channel_action_id], references: [id])
+  communication_events RenewalCommunicationEvent[]   @relation("OutboxCommunicationEvent")
+
+  @@index([status, next_retry_at])
+  @@index([requires_approval, status])
+  @@index([channel_action_id])
+  @@map("notification_outbox")
+}
+
+model RenewalAuditLog {
+  id                 Int      @id @default(autoincrement())
+  renewal_account_id Int
+  entity_type        String   @db.VarChar(30)
+  entity_id          Int
+  action             String   @db.VarChar(50)
+  old_value          String?  @db.LongText
+  new_value          String?  @db.LongText
+  performed_by_id    Int
+  performed_at       DateTime @default(now())
+  ip_address         String?  @db.VarChar(45)
+
+  renewal_account RenewalAccount @relation(fields: [renewal_account_id], references: [id], onDelete: Cascade)
+  performed_by    User           @relation("AuditPerformer", fields: [performed_by_id], references: [id])
+
+  @@index([renewal_account_id, performed_at])
+  @@index([entity_type, entity_id])
+  @@map("renewal_audit_log")
+}
+
+model SmtpConfig {
+  id           Int       @id @default(autoincrement())
+  host         String    @db.VarChar(200)
+  port         Int       @default(587)
+  secure       Int       @default(0) @db.TinyInt
+  username     String    @db.VarChar(300)
+  password_enc String    @db.VarChar(500)
+  from_email   String    @db.VarChar(300)
+  from_name    String    @default("Angler iTech Solutions") @db.VarChar(200)
+  reply_to     String?   @db.VarChar(300)
+  is_active    Int       @default(1) @db.TinyInt
+  tested_at    DateTime?
+  test_result  String?   @db.VarChar(500)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  @@map("smtp_config")
+}
+
+model WhatsappWebSession {
+  id             Int       @id @default(autoincrement())
+  session_name   String    @db.VarChar(100)
+  brand_key      String    @unique(map: "brand_key") @db.VarChar(50)
+  phone_number   String?   @db.VarChar(30)
+  company_id     Int?
+  is_default     Boolean   @default(false)
+  status         String    @default("DISCONNECTED")
+  qr_code_base64 String?   @db.LongText
+  connected_at   DateTime?
+  last_active_at DateTime?
+  error_message  String?   @db.Text
+  is_active      Boolean   @default(true)
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  company Company? @relation(fields: [company_id], references: [id])
+
+  @@index([company_id])
+  @@index([status])
+  @@map("whatsapp_web_session")
+}
+
+model CronJobLock {
+  id                Int      @id @default(autoincrement())
+  job_name          String   @unique(map: "job_name") @db.VarChar(100)
+  lock_owner        String   @db.VarChar(200)
+  locked_at         DateTime @default(now())
+  locked_until      DateTime
+  last_heartbeat_at DateTime @default(now())
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@index([job_name, locked_until])
+  @@map("cron_job_lock")
+}
+
+model RenewalFollowUpTask {
+  id                   Int       @id @default(autoincrement())
+  renewal_account_id   Int
+  service_instance_id  Int
+  cycle_id             Int
+  policy_version       Int?
+  follow_up_group_key  String    @db.VarChar(50)
+  scheduled_for        DateTime
+  overall_status       String    @default("PENDING")
+  assigned_user_id     Int?
+  completed_at         DateTime?
+  cancelled_at         DateTime?
+  cancel_reason        String?   @db.VarChar(500)
+  is_deleted           Boolean   @default(false)
+  source_type          String    @default("POLICY_STEP")
+  source_reference_id  Int?
+  migration_confidence String?   @db.VarChar(20)
+  source               String?   @db.VarChar(50)
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  channel_actions RenewalFollowUpChannelAction[]
+
+  renewal_account      RenewalAccount              @relation(fields: [renewal_account_id], references: [id], onDelete: Restrict)
+  service_instance     RenewalServiceInstance      @relation(fields: [service_instance_id], references: [id], onDelete: Restrict)
+  cycle                RenewalCycle                @relation(fields: [cycle_id], references: [id], onDelete: Restrict)
+  assigned_user        User?                       @relation("FollowUpTaskAssignee", fields: [assigned_user_id], references: [id])
+  communication_events RenewalCommunicationEvent[]
+
+  @@index([scheduled_for, overall_status])
+  @@index([assigned_user_id, overall_status])
+  @@index([cycle_id])
+  @@index([policy_version])
+  @@map("renewal_follow_up_task")
+}
+
+model RenewalFollowUpChannelAction {
+  id                    Int       @id @default(autoincrement())
+  follow_up_task_id     Int
+  renewal_account_id    Int
+  service_instance_id   Int
+  cycle_id              Int
+  reminder_id           Int?
+  channel               String    @db.VarChar(20)
+  action_type           String    @db.VarChar(30)
+  execution_mode        String    @default("AUTOMATIC") @db.VarChar(30)
+  communication_purpose String?   @db.VarChar(30)
+  is_required           Boolean   @default(true)
+  status                String    @default("PENDING")
+  scheduled_at          DateTime?
+  started_at            DateTime?
+  completed_at          DateTime?
+  recipient_contact_id  Int?
+  recipient_address     String?   @db.VarChar(300)
+  template_id           Int?
+  idempotency_key       String    @unique(map: "idempotency_key") @db.VarChar(100)
+  provider_message_id   String?   @db.VarChar(200)
+  outcome_code          String?   @db.VarChar(50)
+  customer_response     String?   @db.Text
+  notes                 String?   @db.Text
+  created_by_id         Int?
+  completed_by_id       Int?
+  is_deleted            Boolean   @default(false)
+  digest_outbox_id      Int?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  follow_up_task       RenewalFollowUpTask          @relation(fields: [follow_up_task_id], references: [id])
+  renewal_account      RenewalAccount               @relation(fields: [renewal_account_id], references: [id], onDelete: Restrict)
+  service_instance     RenewalServiceInstance       @relation(fields: [service_instance_id], references: [id], onDelete: Restrict)
+  cycle                RenewalCycle                 @relation(fields: [cycle_id], references: [id], onDelete: Restrict)
+  reminder             RenewalReminder?             @relation(fields: [reminder_id], references: [id])
+  recipient_contact    RenewalContact?              @relation(fields: [recipient_contact_id], references: [id])
+  template             RenewalNotificationTemplate? @relation(fields: [template_id], references: [id])
+  created_by           User?                        @relation("ChannelActionCreator", fields: [created_by_id], references: [id])
+  completed_by         User?                        @relation("ChannelActionCompleter", fields: [completed_by_id], references: [id])
+  outbox_messages      NotificationOutbox[]         @relation("ChannelActionOutbox")
+  communication_events RenewalCommunicationEvent[]
+
+  @@unique([follow_up_task_id, reminder_id])
+  @@unique([follow_up_task_id, channel, action_type, execution_mode])
+  @@index([follow_up_task_id, channel])
+  @@index([status, scheduled_at])
+  @@index([idempotency_key])
+  @@map("renewal_follow_up_channel_action")
+}
+
+model RenewalCommunicationEvent {
+  id                         Int      @id @default(autoincrement())
+  renewal_account_id         Int
+  service_instance_id        Int
+  cycle_id                   Int
+  follow_up_task_id          Int?
+  channel_action_id          Int?
+  reminder_id                Int?
+  outbox_id                  Int?
+  account_snapshot_id        Int?
+  service_snapshot_id        Int?
+  cycle_snapshot_id          Int?
+  task_snapshot_id           Int?
+  channel_action_snapshot_id Int?
+  channel                    String   @db.VarChar(20)
+  event_type                 String   @db.VarChar(30)
+  execution_mode             String?  @db.VarChar(30)
+  communication_purpose      String?  @db.VarChar(30)
+  direction                  String   @default("OUTBOUND")
+  status                     String
+  actor_type                 String
+  actor_user_id              Int?
+  recipient                  String?  @db.VarChar(300)
+  subject_snapshot           String?  @db.VarChar(500)
+  body_snapshot              String?  @db.LongText
+  attachment_metadata        String?  @db.LongText
+  template_id                Int?
+  template_version           String?  @db.VarChar(50)
+  content_snapshot_ref       String?  @db.VarChar(500)
+  provider_message_id        String?  @db.VarChar(200)
+  error_code                 String?  @db.VarChar(100)
+  error_message              String?  @db.Text
+  metadata                   String?  @db.LongText
+  occurred_at                DateTime @default(now())
+  created_at                 DateTime @default(now())
+
+  renewal_account  RenewalAccount                @relation(fields: [renewal_account_id], references: [id], onDelete: Restrict)
+  service_instance RenewalServiceInstance        @relation(fields: [service_instance_id], references: [id], onDelete: Restrict)
+  cycle            RenewalCycle                  @relation(fields: [cycle_id], references: [id], onDelete: Restrict)
+  follow_up_task   RenewalFollowUpTask?          @relation(fields: [follow_up_task_id], references: [id], onDelete: Restrict)
+  channel_action   RenewalFollowUpChannelAction? @relation(fields: [channel_action_id], references: [id], onDelete: Restrict)
+  reminder         RenewalReminder?              @relation(fields: [reminder_id], references: [id], onDelete: Restrict)
+  outbox           NotificationOutbox?           @relation("OutboxCommunicationEvent", fields: [outbox_id], references: [id], onDelete: SetNull)
+  actor_user       User?                         @relation("CommunicationActor", fields: [actor_user_id], references: [id])
+
+  @@index([renewal_account_id, occurred_at])
+  @@index([service_instance_id, occurred_at])
+  @@index([cycle_id, occurred_at])
+  @@index([follow_up_task_id, occurred_at])
+  @@index([channel_action_id, occurred_at])
+  @@index([channel, occurred_at])
+  @@map("renewal_communication_event")
+}
+
+model collateraltolead {
+  A Int
+  B Int
+
+  @@unique([A, B], map: "_CollateralToLead_AB_unique")
+  @@index([B], map: "_CollateralToLead_B_index")
+  @@map("_collateraltolead")
+}
+
+model managercompanies {
+  A Int
+  B Int
+
+  @@unique([A, B], map: "_ManagerCompanies_AB_unique")
+  @@index([B], map: "_ManagerCompanies_B_index")
+  @@map("_managercompanies")
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  INACTIVE
+}
+
+enum Salutation {
+  Mr
+  Mrs
+  Ms
+  Dr
+}
+
+enum Role {
+  CEO
+  SalesManager
+  SalesPerson
+}
+
+enum MovementType {
+  AUTO
+  MANUAL
+}
+
+enum CallAction {
+  CREATE
+  UPDATE
+}

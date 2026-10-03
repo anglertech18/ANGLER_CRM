@@ -1,0 +1,460 @@
+import { Request, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { resolveDateWindow, resolveQuarterWindow, resolveDateRange } from '../utils/dateFilters';
+
+const authUser = (req: Request) => (req as any).user;
+
+async function getTeamIds(user: any): Promise<number[]> {
+    if (user.role === 'SalesPerson') return [user.id];
+    if (user.role === 'SalesManager') {
+        const team = await prisma.user.findMany({
+            where: { OR: [{ id: user.id }, { reporting_manager_id: user.id }] },
+            select: { id: true },
+        });
+        return team.map((u: any) => u.id);
+    }
+    return []; // CEO — empty means no restriction
+}
+
+const QUADRANT_PROBABILITY: Record<string, string> = {
+    Q1: 'High Probability',
+    Q2: 'Medium Probability',
+    Q3: 'Medium Probability',
+    Q4: 'Low Probability',
+};
+
+function deriveMilestoneStatus(expectedCollectionDate: Date): string {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(expectedCollectionDate);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() < today.getTime() ? 'Delayed' : 'Upcoming';
+}
+
+function deriveHeaderStatus(leadQuadrant: string | null | undefined, milestoneStatuses: string[]): string {
+    if (milestoneStatuses.some(s => s === 'Delayed')) return 'Delayed';
+    return (leadQuadrant && QUADRANT_PROBABILITY[leadQuadrant]) || 'Forecast';
+}
+
+const formatForecast = (f: any) => {
+    const milestones = (f.milestones || []).map((m: any) => ({
+        id: m.id,
+        milestone_master_id: m.milestone_master_id,
+        milestone_master: m.milestone_master ? { id: m.milestone_master.id, name: m.milestone_master.name } : null,
+        expected_amount: m.expected_amount,
+        percentage: m.percentage,
+        expected_collection_date: m.expected_collection_date,
+        remarks: m.remarks,
+        status: deriveMilestoneStatus(m.expected_collection_date),
+    }));
+    const status = deriveHeaderStatus(f.lead?.quadrant, milestones.map((m: any) => m.status));
+    return {
+        id: f.id,
+        lead_id: f.lead_id,
+        company_id: f.company_id,
+        product_id: f.product_id,
+        user_id: f.user_id,
+        vertical_id: f.vertical_id,
+        expected_order_value: f.expected_order_value,
+        device_count: f.device_count,
+        remarks: f.remarks,
+        status,
+        created_at: f.created_at,
+        updated_at: f.updated_at,
+        lead: f.lead ? {
+            id: f.lead.id,
+            company_name: f.lead.company_name,
+            project_name: f.lead.project_name,
+            first_name: f.lead.first_name,
+            last_name: f.lead.last_name,
+            quadrant: f.lead.quadrant,
+            sales_stage_id: f.lead.sales_stage_id,
+        } : null,
+        company: f.company ? { id: f.company.id, name: f.company.name } : null,
+        product: f.product ? { id: f.product.id, name: f.product.name } : null,
+        user: f.user ? { id: f.user.id, first_name: f.user.first_name, last_name: f.user.last_name } : null,
+        vertical: f.vertical ? { id: f.vertical.id, name: f.vertical.name } : null,
+        milestones,
+        milestones_total: milestones.length,
+        milestones_upcoming: milestones.filter((m: any) => m.status !== 'Delayed').length,
+        expected_collection: milestones.reduce((s: number, m: any) => s + (Number(m.expected_amount) || 0), 0),
+    };
+};
+
+const INCLUDE_ALL = {
+    lead: { select: { id: true, company_name: true, project_name: true, first_name: true, last_name: true, quadrant: true, sales_stage_id: true, lead_owner_id: true } },
+    company: true,
+    product: { include: { company: true } },
+    user: true,
+    vertical: true,
+    milestones: { include: { milestone_master: true }, orderBy: { id: 'asc' as const } },
+};
+
+// Scopes a Prisma `where` for ForecastHeader by role: SalesPerson → own leads,
+// SalesManager → team leads, CEO → unrestricted.
+async function applyRbacWhere(user: any, where: any) {
+    if (user.role === 'CEO') return where;
+    const teamIds = await getTeamIds(user);
+    return { ...where, lead: { ...(where.lead || {}), lead_owner_id: { in: teamIds } } };
+}
+
+// Builds the milestone-wise row set behind both the Forecast Table and the
+// dashboard cards (md files/forecast/forecastUI.md), so the two never diverge
+// on which rows count as "visible after filters". Each row is one forecast
+// milestone. "Company" here is the product-mapped (BU) company — product.company_id
+// — the same concept the Cashflow Report filters/groups by, NOT the client's
+// company (lead.company_name) and not ForecastHeader.company_id. Product/BDE
+// filters apply to the parent forecast header, EDC/date/search filters apply per
+// milestone (or, for search, the header's BU company/lead/product too).
+async function getFilteredForecastRows(user: any, query: any) {
+    const { company_id, product_id, vertical_id, bde_id, client_company_id, edc_status, quick_filter, month, quarter, from_date, to_date, search } = query;
+
+    let where: any = {};
+    if (company_id) where.product = { ...(where.product || {}), company_id: Number(company_id) };
+    if (product_id) where.product_id = Number(product_id);
+    if (vertical_id) where.vertical_id = Number(vertical_id);
+    if (bde_id) where.user_id = Number(bde_id);
+    if (client_company_id) where.lead = { ...(where.lead || {}), client_company_id: Number(client_company_id) };
+
+    if (search) {
+        const s = String(search).trim();
+        if (s) {
+            where.OR = [
+                { product: { company: { name: { contains: s } } } },
+                { lead: { company_name: { contains: s } } },
+                { product: { name: { contains: s } } },
+                { remarks: { contains: s } },
+            ];
+        }
+    }
+
+    where = await applyRbacWhere(user, where);
+
+    const headers = await prisma.forecastHeader.findMany({
+        where,
+        include: INCLUDE_ALL,
+        orderBy: { updated_at: 'desc' },
+    });
+
+    const edcStatus = (edc_status as string) || 'all';
+    // Midnight today — every EDC comparison below measures against the start of the day,
+    // never the current instant, so a date falling today is never counted as due.
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfTodayMs = startOfToday.getTime();
+    const dateWindow = resolveDateWindow(quick_filter as string | undefined, month as string | undefined);
+    const quarterWindow = resolveQuarterWindow(quarter as string | undefined);
+    const dateRange = resolveDateRange(from_date as string | undefined, to_date as string | undefined);
+
+    const rows: any[] = [];
+    for (const h of headers) {
+        const buCompanyId = h.product?.company_id ?? null;
+        const buCompanyName = h.product?.company?.name || '—';
+        for (const m of h.milestones) {
+            const edc = m.expected_collection_date;
+
+            // EDC filter (md files/cashflow/edcfilter.md). Forecast milestones have no
+            // Revised EDC concept, so Due Revised EDC never matches; Upcoming and Due
+            // read the single EDC against the start of today, so a date falling today is
+            // Upcoming rather than Due.
+            if (edcStatus === 'due_revised') continue;
+            if (edcStatus === 'upcoming' || edcStatus === 'due') {
+                if (!edc) continue;
+                const overdue = new Date(edc).getTime() < startOfTodayMs;
+                if (edcStatus === 'upcoming' && overdue) continue;
+                if (edcStatus === 'due' && !overdue) continue;
+            }
+            if (dateWindow) {
+                if (!edc) continue;
+                const d = new Date(edc);
+                if (d < dateWindow.start || d > dateWindow.end) continue;
+            }
+            // Forecast milestones have no Revised EDC concept, so the Effective EDC
+            // used by the Quarter and From/To Date filters is simply expected_collection_date.
+            if (quarterWindow) {
+                if (!edc) continue;
+                const d = new Date(edc);
+                if (d < quarterWindow.start || d > quarterWindow.end) continue;
+            }
+            if (dateRange) {
+                if (!edc) continue;
+                const d = new Date(edc);
+                if (dateRange.from && d < dateRange.from) continue;
+                if (dateRange.to && d > dateRange.to) continue;
+            }
+
+            rows.push({
+                milestone_id: m.id,
+                forecast_id: h.id,
+                lead_id: h.lead_id,
+                company_id: buCompanyId,
+                company: buCompanyName,
+                lead_company: h.lead?.company_name || '—',
+                lead_project_name: h.lead?.project_name || null,
+                vertical: h.vertical?.name || '—',
+                product: h.product?.name || '—',
+                device_count: h.device_count,
+                bde: h.user ? `${h.user.first_name} ${h.user.last_name || ''}`.trim() : '—',
+                milestone_type: m.milestone_master?.name || '—',
+                expected_amount: Number(m.expected_amount) || 0,
+                edc,
+                remarks: m.remarks || '',
+            });
+        }
+    }
+
+    return rows;
+}
+
+export const getForecastList = async (req: Request, res: Response) => {
+    try {
+        const user = authUser(req);
+        const rows = await getFilteredForecastRows(user, req.query);
+        rows.sort((a, b) => a.company.localeCompare(b.company));
+        res.json({ success: true, data: rows });
+    } catch (err: any) {
+        console.error('[getForecastList] error:', err);
+        res.status(500).json({ success: false, message: 'Failed to fetch forecasts' });
+    }
+};
+
+export const getForecastDashboard = async (req: Request, res: Response) => {
+    try {
+        const user = authUser(req);
+        const rows = await getFilteredForecastRows(user, req.query);
+
+        const totalForecastLeads = new Set(rows.map(r => r.lead_id)).size;
+        const expectedAmount = rows.reduce((s, r) => s + r.expected_amount, 0);
+
+        res.json({
+            success: true,
+            data: {
+                total_forecast_leads: totalForecastLeads,
+                expected_amount: expectedAmount,
+            },
+        });
+    } catch (err: any) {
+        console.error('[getForecastDashboard] error:', err);
+        res.status(500).json({ success: false, message: 'Failed to fetch forecast dashboard' });
+    }
+};
+
+// BDE filter — lists only BDEs who own at least one forecast (bde.md-style filter
+// optimization), scoped by the current Company/Product selection and the caller's
+// normal RBAC visibility.
+export const getForecastBdes = async (req: Request, res: Response) => {
+    try {
+        const user = authUser(req);
+        const { company_id, product_id } = req.query;
+
+        let where: any = {};
+        if (company_id) where.product = { company_id: Number(company_id) };
+        if (product_id) where.product_id = Number(product_id);
+        where = await applyRbacWhere(user, where);
+
+        const headers = await prisma.forecastHeader.findMany({
+            where,
+            select: { user: { select: { id: true, first_name: true, last_name: true } } },
+        });
+
+        const map = new Map<number, { id: number; first_name: string; last_name: string | null }>();
+        for (const h of headers) {
+            if (h.user) map.set(h.user.id, h.user);
+        }
+        const bdes = [...map.values()].sort((a, b) => a.first_name.localeCompare(b.first_name));
+
+        res.json(bdes);
+    } catch (err: any) {
+        console.error('[getForecastBdes] error:', err);
+        res.status(500).json({ success: false, message: 'Failed to fetch BDE filter options' });
+    }
+};
+
+// Client Company filter (clientcomFilter.md) — lists only client companies with at
+// least one forecasted milestone matching the current Company/Product/BDE
+// selection, instead of the full Client Company master. Scoped by the same RBAC
+// visibility as the forecast list itself.
+export const getForecastClientCompanies = async (req: Request, res: Response) => {
+    try {
+        const user = authUser(req);
+        const { company_id, product_id, bde_id } = req.query;
+
+        let where: any = { lead: { client_company_id: { not: null } }, milestones: { some: {} } };
+        if (company_id) where.product = { company_id: Number(company_id) };
+        if (product_id) where.product_id = Number(product_id);
+        if (bde_id) where.user_id = Number(bde_id);
+        where = await applyRbacWhere(user, where);
+
+        const headers = await prisma.forecastHeader.findMany({
+            where,
+            select: { lead: { select: { company_master: { select: { id: true, name: true } } } } },
+        });
+
+        const map = new Map<number, { id: number; name: string }>();
+        for (const h of headers) {
+            const cc = (h.lead as any)?.company_master;
+            if (cc) map.set(cc.id, { id: cc.id, name: cc.name || `Company #${cc.id}` });
+        }
+        const companies = [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+        res.json(companies);
+    } catch (err: any) {
+        console.error('[getForecastClientCompanies] error:', err);
+        res.status(500).json({ success: false, message: 'Failed to fetch client company filter options' });
+    }
+};
+
+export const getForecastById = async (req: Request, res: Response) => {
+    try {
+        const user = authUser(req);
+        const id = Number(req.params.id);
+        if (isNaN(id) || !id) return res.status(400).json({ success: false, message: 'Invalid or missing forecast ID' });
+        const forecast = await prisma.forecastHeader.findUnique({ where: { id }, include: INCLUDE_ALL });
+        if (!forecast) return res.status(404).json({ success: false, message: 'Forecast not found' });
+
+        if (user.role !== 'CEO') {
+            const teamIds = await getTeamIds(user);
+            if (!teamIds.includes(Number((forecast.lead as any)?.lead_owner_id))) {
+                return res.status(403).json({ success: false, message: 'Access denied' });
+            }
+        }
+
+        res.json({ success: true, data: formatForecast(forecast) });
+    } catch (err: any) {
+        console.error('[getForecastById] error:', err);
+        res.status(500).json({ success: false, message: 'Failed to fetch forecast' });
+    }
+};
+
+export const getForecastByLeadId = async (req: Request, res: Response) => {
+    try {
+        const lead_id = Number(req.params.leadId);
+        const forecast = await prisma.forecastHeader.findUnique({ where: { lead_id }, include: INCLUDE_ALL });
+        if (!forecast) return res.json({ success: true, data: null });
+        res.json({ success: true, data: formatForecast(forecast) });
+    } catch (err: any) {
+        console.error('[getForecastByLeadId] error:', err);
+        res.status(500).json({ success: false, message: 'Failed to fetch forecast' });
+    }
+};
+
+// Device count, milestone Expected Amount and Percentage are intentionally left
+// unvalidated: not every product tracks a device count, and BDEs commonly add or
+// refine milestones incrementally over several edits rather than completing the
+// full plan in one pass.
+const validateForecastPayload = (body: any): string | null => {
+    const expectedOrderValue = parseFloat(body.expected_order_value);
+    if (!expectedOrderValue || expectedOrderValue <= 0) {
+        return 'Expected Order Value must be greater than 0.';
+    }
+    if (!body.vertical_id) {
+        return 'Vertical is required.';
+    }
+    const milestones: any[] = body.milestones || [];
+    for (const m of milestones) {
+        if (!m.expected_collection_date) return 'Expected Collection Date is mandatory for every milestone.';
+        if (!m.milestone_master_id) return 'Milestone Type is mandatory for every milestone.';
+    }
+    return null;
+};
+
+// Creates or replaces the forecast (header + milestone plan) for a lead. Called
+// from LeadForm when "Expected Order" is checked and saved.
+export const upsertForecast = async (req: Request, res: Response) => {
+    try {
+        const user = authUser(req);
+        const lead_id = Number(req.body.lead_id);
+        if (!lead_id) return res.status(400).json({ success: false, message: 'lead_id is required.' });
+
+        const lead = await prisma.lead.findUnique({ where: { id: lead_id } });
+        if (!lead) return res.status(404).json({ success: false, message: 'Lead not found' });
+        if (lead.quadrant === 'Order Won' || lead.quadrant === 'Order Lost') {
+            return res.status(400).json({ success: false, message: 'Cannot forecast a lead that is already Order Won or Lost.' });
+        }
+
+        if (user.role !== 'CEO') {
+            const teamIds = await getTeamIds(user);
+            if (!teamIds.includes(Number(lead.lead_owner_id))) {
+                return res.status(403).json({ success: false, message: 'Access denied' });
+            }
+        }
+
+        const validationError = validateForecastPayload(req.body);
+        if (validationError) return res.status(400).json({ success: false, message: validationError });
+
+        const milestones: any[] = req.body.milestones || [];
+
+        const data = {
+            lead_id,
+            company_id: req.body.company_id ? Number(req.body.company_id) : (lead.company_id || null),
+            product_id: req.body.product_id ? Number(req.body.product_id) : (lead.product_id || null),
+            user_id: lead.lead_owner_id || null,
+            vertical_id: Number(req.body.vertical_id),
+            expected_order_value: parseFloat(req.body.expected_order_value),
+            device_count: (req.body.device_count != null && req.body.device_count !== '') ? Number(req.body.device_count) : null,
+            remarks: req.body.remarks || null,
+        };
+
+        const forecast = await prisma.$transaction(async (tx) => {
+            const header = await tx.forecastHeader.upsert({
+                where: { lead_id },
+                create: data,
+                update: data,
+            });
+
+            await tx.forecastMilestone.deleteMany({ where: { forecast_id: header.id } });
+            if (milestones.length) {
+                await tx.forecastMilestone.createMany({
+                    data: milestones.map((m: any) => ({
+                        forecast_id: header.id,
+                        milestone_master_id: m.milestone_master_id ? Number(m.milestone_master_id) : null,
+                        expected_amount: (m.expected_amount != null && m.expected_amount !== '') ? parseFloat(m.expected_amount) : null,
+                        percentage: (m.percentage != null && m.percentage !== '') ? parseFloat(m.percentage) : null,
+                        expected_collection_date: new Date(m.expected_collection_date),
+                        remarks: m.remarks || null,
+                    })),
+                });
+            }
+
+            return tx.forecastHeader.findUnique({ where: { id: header.id }, include: INCLUDE_ALL });
+        });
+
+        res.json({ success: true, message: 'Forecast saved successfully', data: formatForecast(forecast) });
+    } catch (err: any) {
+        console.error('[upsertForecast] error:', err);
+        res.status(500).json({ success: false, message: 'Failed to save forecast' });
+    }
+};
+
+export const deleteForecast = async (req: Request, res: Response) => {
+    try {
+        const user = authUser(req);
+        const id = Number(req.params.id);
+        const forecast = await prisma.forecastHeader.findUnique({ where: { id }, include: { lead: { select: { lead_owner_id: true } } } });
+        if (!forecast) return res.status(404).json({ success: false, message: 'Forecast not found' });
+
+        if (user.role !== 'CEO') {
+            const teamIds = await getTeamIds(user);
+            if (!teamIds.includes(Number((forecast.lead as any)?.lead_owner_id))) {
+                return res.status(403).json({ success: false, message: 'Access denied' });
+            }
+        }
+
+        await prisma.forecastHeader.delete({ where: { id } });
+        res.json({ success: true, message: 'Forecast deleted successfully' });
+    } catch (err: any) {
+        console.error('[deleteForecast] error:', err);
+        res.status(500).json({ success: false, message: 'Failed to delete forecast' });
+    }
+};
+
+// Called by leadController.ts whenever a lead's quadrant resolves to Order Won or
+// Order Lost — the forecast record (and its milestones, via cascade) is deleted
+// per the spec's Order Won/Lost flow. Safe to call even if no forecast exists.
+export const deleteForecastForLead = async (leadId: number): Promise<void> => {
+    try {
+        await prisma.forecastHeader.deleteMany({ where: { lead_id: leadId } });
+    } catch (err) {
+        console.error('[deleteForecastForLead] error:', err);
+    }
+};
