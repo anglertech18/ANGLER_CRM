@@ -9,7 +9,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "create-admin": "ts-node prisma/create-admin.ts",
-    "seed:geo": "ts-node prisma/seed-geo.ts"
+    "seed:geo": "ts-node prisma/seed-geo.ts",
+    "seed:templates": "ts-node prisma/seed-email-templates.ts",
+    "seed:renewal-masters": "ts-node src/scripts/seedRenewalCompanyMasters.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -44,6 +46,9 @@
   "dependencies": {
     "@prisma/client": "^6.19.2",
     "@types/nodemailer": "^7.0.9",
+    "@types/pdfkit": "^0.17.6",
+    "@types/qrcode": "^1.5.6",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "country-state-city": "^3.2.1",
@@ -57,6 +62,8 @@
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^8.0.0",
+    "pdfkit": "^0.19.1",
+    "qrcode": "^1.5.4",
     "xlsx": "^0.18.5",
     "zod": "^4.1.13"
   }

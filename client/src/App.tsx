@@ -6,7 +6,17 @@ import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import ActivateAccount from './pages/ActivateAccount';
-import Dashboard from './pages/Dashboard';
+import RenewalDashboard from './pages/renewals/RenewalDashboard';
+import RenewalForm from './pages/renewals/RenewalForm';
+import RenewalContacts from './pages/renewals/RenewalContacts';
+import RenewalRegister from './pages/renewals/RenewalRegister';
+import RenewalFollowUps from './pages/renewals/RenewalFollowUps';
+import RenewalReports from './pages/renewals/RenewalReports';
+import TemplateBuilderPage from './pages/renewals/TemplateBuilderPage';
+import TemplatesPage from './pages/renewals/TemplatesPage';
+import MappingDashboard from './pages/renewals/MappingDashboard';
+import MappingDetail from './pages/renewals/MappingDetail';
+import MappingForm from './pages/renewals/MappingForm';
 import MyProfile from './pages/MyProfile';
 
 const queryClient = new QueryClient();
@@ -98,6 +108,19 @@ function AppRoutes() {
         <Route path="partner-signup" element={<PartnerSignup />} />
         <Route path="partner-signup/new" element={<PartnerForm />} />
         <Route path="partner-signup/:id/edit" element={<PartnerForm />} />
+
+        <Route path="renewals" element={<RenewalDashboard />} />
+        <Route path="renewals/new" element={<RenewalForm />} />
+        <Route path="renewals/:id" element={<RenewalDetail />} />
+        <Route path="renewals/:id/contacts" element={<RenewalContacts />} />
+        <Route path="renewals/:id/register" element={<RenewalRegister />} />
+        <Route path="renewals/follow-ups" element={<RenewalFollowUps />} />
+        <Route path="renewals/reports" element={<RenewalReports />} />
+        <Route path="renewals/templates" element={<TemplatesPage />} />
+        <Route path="renewals/template-builder" element={<TemplateBuilderPage />} />
+        <Route path="renewals/mappings" element={<MappingDashboard />} />
+        <Route path="renewals/mappings/:type" element={<MappingDetail />} />
+        <Route path="renewals/mappings/:type/new" element={<MappingForm />} />
 
         <Route path="cashflow">
           <Route index element={<Navigate to="order-won" replace />} />

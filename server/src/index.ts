@@ -116,6 +116,7 @@ import swatRoutes from './routes/swatRoutes';
 import { startQuadrantCron } from './cron/quadrantCron';
 import { startSwatCron } from './cron/swatCron';
 import { startDailyReportCron } from './cron/dailyReportCron';
+import { startRenewalReminderCron } from './cron/renewalReminderCron';
 
 import kraRoutes from './routes/kraRoutes';
 import sealRoutes from './routes/sealRoutes';
@@ -127,6 +128,19 @@ import cashflowReportRoutes from './routes/cashflowReportRoutes';
 import orderWonReportRoutes from './routes/orderWonReportRoutes';
 import cashflowForecastRoutes from './routes/cashflowForecastRoutes';
 import billingForecastRoutes from './routes/billingForecastRoutes';
+import renewalRoutes from './routes/renewalRoutes';
+import renewalFollowUpRoutes from './routes/renewalFollowUpRoutes';
+import renewalSettingsRoutes from './routes/renewalSettingsRoutes';
+import renewalMasterRoutes from './routes/renewalMasterRoutes';
+import renewalReportRoutes from './routes/renewalReportRoutes';
+import notificationRoutes from './routes/notificationRoutes';
+import renewalPricingRoutes from './routes/renewalPricingRoutes';
+import renewalTemplateBuilderRoutes from './routes/renewalTemplateBuilderRoutes';
+import smtpConfigRoutes from './routes/smtpConfigRoutes';
+import whatsappWebRoutes from './routes/whatsappWebRoutes';
+import renewalFollowUpTaskRoutes from './routes/renewalFollowUpTaskRoutes';
+import renewalFollowUpChannelActionRoutes from './routes/renewalFollowUpChannelActionRoutes';
+import renewalCommunicationEventRoutes from './routes/renewalCommunicationEventRoutes';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/masters', masterRoutes);
@@ -148,6 +162,19 @@ app.use('/api/cashflow-report', cashflowReportRoutes);
 app.use('/api/order-won-report', orderWonReportRoutes);
 app.use('/api/cashflow-forecast', cashflowForecastRoutes);
 app.use('/api/billing-forecast', billingForecastRoutes);
+app.use('/api/renewals', renewalRoutes);
+app.use('/api/renewal-followups', renewalFollowUpRoutes);
+app.use('/api/renewal-settings', renewalSettingsRoutes);
+app.use('/api/renewal-masters', renewalMasterRoutes);
+app.use('/api/renewal-reports', renewalReportRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/renewal-pricing', renewalPricingRoutes);
+app.use('/api/renewal-templates', renewalTemplateBuilderRoutes);
+app.use('/api/smtp-config', smtpConfigRoutes);
+app.use('/api/whatsapp-web', whatsappWebRoutes);
+app.use('/api/renewal-follow-up-tasks', renewalFollowUpTaskRoutes);
+app.use('/api/renewal-channel-actions', renewalFollowUpChannelActionRoutes);
+app.use('/api/renewal-communication-events', renewalCommunicationEventRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
@@ -181,9 +208,8 @@ process.on('unhandledRejection', (reason, promise) => {
 
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
-    // Temporarily disabled cron job - uncomment after lead creation is working
     startQuadrantCron();
     startSwatCron();
     startDailyReportCron();
-    // Trigger nodemon restart
+    startRenewalReminderCron();
 });
