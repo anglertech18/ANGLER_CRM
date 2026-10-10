@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 generator custom_client {
-  provider = "prisma-client-js"
-  output   = "./v2-client"
+  provider      = "prisma-client-js"
+  output        = "./v2-client"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -99,30 +101,25 @@ model User {
   created_at     DateTime       @default(now())
   updated_at     DateTime       @updatedAt
   weekly_reports WeeklyReport[] @relation("UserWeeklyReports")
-  poas           PlanOfAction[] @relation("UserPOAs")
   partners       Partner[]      @relation("UserPartners")
+  poas           PlanOfAction[] @relation("UserPOAs")
   bant_answers   LeadBantAnswer[]
+  pricing_negotiations_renewal LeadPricingNegotiation[]
 
   @@map("user")
-}
 
-enum UserStatus {
-  INVITED
-  ACTIVE
-  INACTIVE
-}
-
-enum Salutation {
-  Mr
-  Mrs
-  Ms
-  Dr
-}
-
-enum Role {
-  CEO
-  SalesManager
-  SalesPerson
+managed_accounts           RenewalAccount[]  @relation("AccountManagerAccounts")
+executive_accounts         RenewalAccount[]  @relation("ExecutiveAccounts")
+approved_outboxes          NotificationOutbox[]    @relation("NotificationApprovedBy")
+renewal_reminders_assigned RenewalReminder[]       @relation("ReminderAssignee")
+renewal_reminders_completed RenewalReminder[]      @relation("ReminderCompleter")
+renewal_follow_up_logs     RenewalFollowUpLog[]    @relation("FollowUpLogger")
+follow_up_tasks_assigned   RenewalFollowUpTask[]   @relation("FollowUpTaskAssignee")
+channel_actions_created    RenewalFollowUpChannelAction[] @relation("ChannelActionCreator")
+channel_actions_completed  RenewalFollowUpChannelAction[] @relation("ChannelActionCompleter")
+communication_events_performed RenewalCommunicationEvent[] @relation("CommunicationActor")
+renewal_service_assignments RenewalServiceInstance[] @relation("ServiceAssignee")
+renewal_audit_logs         RenewalAuditLog[]       @relation("AuditPerformer")
 }
 
 model Privilege {
@@ -661,6 +658,10 @@ model Lead {
 
   // Sales Engagement Date — dashboard Sales Activities cards + Lead Report filter
   @@index([follow_up_datetime], map: "idx_lead_follow_up_datetime")
+  pricing_negotiations_renewal LeadPricingNegotiation[]
+  where_find_them_renewal_id Int?
+  where_find_them_renewal WhereFindThem? @relation("WhereFindThemLeads", fields: [where_find_them_renewal_id], references: [id])
+
   @@map("lead")
 }
 
@@ -866,6 +867,15 @@ model ClientCompany {
   updated_at DateTime @updatedAt
 
   @@map("client_company")
+
+address           String?           @db.Text
+city_pincode      String?           @db.VarChar(100)
+state             String?           @db.VarChar(100)
+gstin             String?           @db.VarChar(50)
+phone             String?           @db.VarChar(30)
+email             String?           @db.VarChar(100)
+renewal_accounts  RenewalAccount[]
+renewal_contacts  RenewalContact[]
 }
 
 model Vertical {
@@ -1581,4 +1591,918 @@ model DailyReportSwatMetric {
   daily_report_product DailyReportProduct @relation(fields: [daily_report_product_id], references: [id], onDelete: Cascade)
 
   @@map("dailyreportswatmetric")
+}
+
+model ApplicationNotification {
+  id          Int       @id @default(autoincrement())
+  user_id     Int
+  reminder_id Int?
+  type        String    @db.VarChar(50)
+  title       String    @db.VarChar(300)
+  body        String    @db.Text
+  link        String?   @db.VarChar(500)
+  is_read     Boolean   @default(false)
+  read_at     DateTime?
+  created_at  DateTime  @default(now())
+
+  @@index([user_id, is_read])
+  @@index([user_id, created_at])
+  @@map("application_notification")
+}
+
+model CronJobLock {
+  id                Int      @id @default(autoincrement())
+  job_name          String   @unique(map: "job_name") @db.VarChar(100)
+  lock_owner        String   @db.VarChar(200)
+  locked_at         DateTime @default(now())
+  locked_until      DateTime
+  last_heartbeat_at DateTime @default(now())
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@index([job_name, locked_until])
+  @@map("cron_job_lock")
+}
+
+model LeadPricingNegotiation {
+  id            Int      @id @default(autoincrement())
+  lead_id       Int
+  user_id       Int
+  offered_price Decimal? @db.Decimal(15, 2)
+  remarks       String?  @db.Text
+  created_at    DateTime @default(now())
+
+  lead          Lead     @relation(fields: [lead_id], references: [id])
+  user          User     @relation(fields: [user_id], references: [id])
+
+  @@map("leadpricingnegotiation")
+}
+
+model NotificationOutbox {
+  id                        Int       @id @default(autoincrement())
+  channel                   String    @db.VarChar(20)
+  recipient                 String    @db.VarChar(300)
+  cc_recipients             String?   @db.VarChar(500)
+  recipient_name            String?   @db.VarChar(200)
+  template_id               Int?
+  subject                   String?   @db.VarChar(500)
+  rendered_body             String    @db.Text
+  status                    String    @default("QUEUED")
+  attempt_count             Int       @default(0)
+  next_retry_at             DateTime?
+  sent_at                   DateTime?
+  provider_ref              String?   @db.VarChar(200)
+  error_message             String?   @db.Text
+  requires_approval         Boolean   @default(false)
+  approved_by_id            Int?
+  approved_at               DateTime?
+  mapping_context           String?   @db.LongText
+  attachment_path           String?   @db.VarChar(500)
+  session_phone             String?   @db.VarChar(30)
+  channel_action_id         Int?
+  follow_up_task_id         Int?
+  execution_mode            String?   @db.VarChar(50)
+  communication_purpose     String?   @db.VarChar(50)
+  idempotency_key           String?   @unique(map: "notification_outbox_idempotency_key_key") @db.VarChar(200)
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @updatedAt
+  digest_channel_action_ids String?   @db.Text
+  delivery_status           String?   @db.VarChar(50)
+  delivery_timestamp        DateTime?
+  read_timestamp            DateTime?
+  bounce_type               String?   @db.VarChar(50)
+
+  approved_by               User?     @relation("NotificationApprovedBy", fields: [approved_by_id], references: [id])
+  channel_action            RenewalFollowUpChannelAction? @relation("ChannelActionOutbox", fields: [channel_action_id], references: [id])
+  communication_events      RenewalCommunicationEvent[] @relation("OutboxCommunicationEvent")
+
+  @@index([status, next_retry_at])
+  @@index([requires_approval, status])
+  @@index([channel_action_id])
+  @@map("notification_outbox")
+}
+
+model RenewalAccount {
+  id                   Int       @id @default(autoincrement())
+  company_id           Int?
+  client_company_id    Int
+  account_manager_id   Int?
+  renewal_executive_id Int?
+  order_number         String?
+  order_date           DateTime?
+  po_reference         String?
+  invoice_number       String?
+  invoice_date         DateTime?
+  notes                String?   @db.Text
+  status               String    @default("DRAFT")
+  source_lead_id       Int?
+  created_by_id        Int
+  is_active            Boolean   @default(true)
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now()) @updatedAt
+
+  company              Company?                 @relation(fields: [company_id], references: [id])
+  client_company       ClientCompany            @relation(fields: [client_company_id], references: [id])
+  account_manager      User?                    @relation("AccountManagerAccounts", fields: [account_manager_id], references: [id])
+  renewal_executive    User?                    @relation("ExecutiveAccounts", fields: [renewal_executive_id], references: [id])
+  services             RenewalServiceInstance[]
+  contacts             RenewalAccountContact[]
+  documents            RenewalDocument[]
+  audit_logs           RenewalAuditLog[]
+  follow_up_tasks      RenewalFollowUpTask[]
+  channel_actions      RenewalFollowUpChannelAction[]
+  communication_events RenewalCommunicationEvent[]
+
+  @@index([client_company_id])
+  @@index([account_manager_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("renewal_account")
+}
+
+model RenewalAccountContact {
+  id                 Int @id @default(autoincrement())
+  renewal_account_id Int
+  contact_id         Int
+
+  renewal_account    RenewalAccount @relation(fields: [renewal_account_id], references: [id], onDelete: Cascade)
+  contact            RenewalContact @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+
+  @@unique([renewal_account_id, contact_id])
+  @@map("renewal_account_contact")
+}
+
+model RenewalAuditLog {
+  id                 Int      @id @default(autoincrement())
+  renewal_account_id Int
+  entity_type        String   @db.VarChar(30)
+  entity_id          Int
+  action             String   @db.VarChar(50)
+  old_value          String?  @db.LongText
+  new_value          String?  @db.LongText
+  performed_by_id    Int
+  performed_at       DateTime @default(now())
+  ip_address         String?  @db.VarChar(45)
+
+  renewal_account    RenewalAccount @relation(fields: [renewal_account_id], references: [id], onDelete: Cascade)
+  performed_by       User           @relation("AuditPerformer", fields: [performed_by_id], references: [id])
+
+  @@index([renewal_account_id, performed_at])
+  @@index([entity_type, entity_id])
+  @@map("renewal_audit_log")
+}
+
+model RenewalBrandProfile {
+  id                Int      @id @default(autoincrement())
+  company_id        Int?
+  profile_name      String   @default("Default")
+  company_name      String?  @db.VarChar(200)
+  logo_url          String?  @db.VarChar(500)
+  alt_logo_url      String?  @db.VarChar(500)
+  primary_color     String?  @default("#074388") @db.VarChar(7)
+  secondary_color   String?  @default("#0ea5e9") @db.VarChar(7)
+  sender_name       String?  @default("Angler iTech Solutions")
+  sender_email      String?  @db.VarChar(300)
+  reply_to_email    String?  @db.VarChar(300)
+  phone             String?  @db.VarChar(50)
+  website_url       String?  @db.VarChar(300)
+  email_footer      String?  @db.LongText
+  bank_name         String?  @db.VarChar(200)
+  bank_account_no   String?  @db.VarChar(100)
+  bank_branch       String?  @db.VarChar(200)
+  bank_ifsc         String?  @db.VarChar(50)
+  bank_account_name String?  @db.VarChar(200)
+  is_default        Boolean  @default(false)
+  is_active         Boolean  @default(true)
+  created_at        DateTime                     @default(now())
+  updated_at        DateTime                     @default(now()) @updatedAt
+
+  templates         RenewalNotificationTemplate[]
+
+  @@index([company_id])
+  @@map("renewal_brand_profile")
+}
+
+model RenewalCommunicationEvent {
+  id                         Int      @id @default(autoincrement())
+  renewal_account_id         Int
+  service_instance_id        Int
+  cycle_id                   Int
+  follow_up_task_id          Int?
+  channel_action_id          Int?
+  reminder_id                Int?
+  outbox_id                  Int?
+  account_snapshot_id        Int?
+  service_snapshot_id        Int?
+  cycle_snapshot_id          Int?
+  task_snapshot_id           Int?
+  channel_action_snapshot_id Int?
+  channel                    String   @db.VarChar(20)
+  event_type                 String   @db.VarChar(30)
+  execution_mode             String?  @db.VarChar(30)
+  communication_purpose      String?  @db.VarChar(30)
+  direction                  String   @default("OUTBOUND")
+  status                     String
+  actor_type                 String
+  actor_user_id              Int?
+  recipient                  String?  @db.VarChar(300)
+  subject_snapshot           String?  @db.VarChar(500)
+  body_snapshot              String?  @db.LongText
+  attachment_metadata        String?  @db.LongText
+  template_id                Int?
+  template_version           String?  @db.VarChar(50)
+  content_snapshot_ref       String?  @db.VarChar(500)
+  provider_message_id        String?  @db.VarChar(200)
+  error_code                 String?  @db.VarChar(100)
+  error_message              String?  @db.Text
+  metadata                   String?  @db.LongText
+  occurred_at                DateTime @default(now())
+  created_at                 DateTime @default(now())
+
+  renewal_account   RenewalAccount @relation(fields: [renewal_account_id], references: [id], onDelete: Restrict)
+  service_instance  RenewalServiceInstance @relation(fields: [service_instance_id], references: [id], onDelete: Restrict)
+  cycle             RenewalCycle @relation(fields: [cycle_id], references: [id], onDelete: Restrict)
+  follow_up_task    RenewalFollowUpTask? @relation(fields: [follow_up_task_id], references: [id], onDelete: Restrict)
+  channel_action    RenewalFollowUpChannelAction? @relation(fields: [channel_action_id], references: [id], onDelete: Restrict)
+  reminder          RenewalReminder? @relation(fields: [reminder_id], references: [id], onDelete: Restrict)
+  outbox            NotificationOutbox? @relation("OutboxCommunicationEvent", fields: [outbox_id], references: [id], onDelete: SetNull)
+  actor_user        User? @relation("CommunicationActor", fields: [actor_user_id], references: [id])
+
+  @@index([renewal_account_id, occurred_at])
+  @@index([service_instance_id, occurred_at])
+  @@index([cycle_id, occurred_at])
+  @@index([follow_up_task_id, occurred_at])
+  @@index([channel_action_id, occurred_at])
+  @@index([channel, occurred_at])
+  @@map("renewal_communication_event")
+}
+
+model RenewalContact {
+  id                   Int      @id @default(autoincrement())
+  client_company_id    Int
+  name                 String
+  designation          String?
+  department           String?
+  email                String?
+  mobile               String?
+  whatsapp             String?
+  role                 String?
+  is_primary           Boolean  @default(false)
+  is_renewal_contact   Boolean  @default(true)
+  whatsapp_consent     Boolean  @default(false)
+  is_active            Boolean  @default(true)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @default(now()) @updatedAt
+  address              String?  @db.Text
+  city_pincode         String?  @db.VarChar(100)
+  state                String?  @db.VarChar(100)
+  gstin                String?  @db.VarChar(50)
+  email_consent        Boolean  @default(true)
+  phone_consent        Boolean  @default(true)
+  use_default_template Boolean  @default(false)
+
+  client_company       ClientCompany @relation(fields: [client_company_id], references: [id])
+  account_contacts     RenewalAccountContact[]
+  service_instances    RenewalServiceInstance[]
+  channel_actions      RenewalFollowUpChannelAction[]
+
+  @@index([client_company_id])
+  @@map("renewal_contact")
+}
+
+model RenewalCustomerPrice {
+  id                Int       @id @default(autoincrement())
+  client_company_id Int
+  service_master_id Int
+  override_price    Decimal   @db.Decimal(12, 2)
+  billing_unit      String    @default("year") @db.VarChar(20)
+  currency          String    @default("INR") @db.VarChar(5)
+  effective_from    DateTime  @db.Date
+  effective_to      DateTime? @db.Date
+  is_active         Boolean   @default(true)
+  notes             String?   @db.Text
+  approved_by_id    Int?
+  created_by_id     Int?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  service_master RenewalServiceMaster @relation(fields: [service_master_id], references: [id])
+
+  @@index([client_company_id, service_master_id, is_active])
+  @@index([effective_from, effective_to])
+  @@map("renewal_customer_price")
+}
+
+model RenewalCycle {
+  id                       Int       @id @default(autoincrement())
+  service_instance_id      Int
+  cycle_number             Int       @default(1)
+  activation_date          DateTime?
+  expiry_date              DateTime?
+  amount_due               Decimal   @default(0.00) @db.Decimal(12, 2)
+  amount_collected         Decimal   @default(0.00) @db.Decimal(12, 2)
+  outstanding              Decimal   @default(0.00) @db.Decimal(12, 2)
+  status                   String    @default("ACTIVE")
+  renewed_at               DateTime?
+  renewed_by_id            Int?
+  is_active                Boolean   @default(true)
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @default(now()) @updatedAt
+  reminder_policy_snapshot String?                @db.LongText
+  not_renewing_reason      String?                @db.Text
+
+  service_instance         RenewalServiceInstance @relation(fields: [service_instance_id], references: [id], onDelete: Cascade)
+  reminders                RenewalReminder[]
+  payments                 RenewalPayment[]
+  follow_up_tasks          RenewalFollowUpTask[]
+  channel_actions          RenewalFollowUpChannelAction[]
+  communication_events     RenewalCommunicationEvent[]
+
+  @@index([service_instance_id, status])
+  @@index([expiry_date])
+  @@map("renewal_cycle")
+}
+
+model RenewalDocument {
+  id                 Int            @id @default(autoincrement())
+  renewal_account_id Int
+  document_type      String?        @db.VarChar(50)
+  name               String?
+  url                String
+  uploaded_by_id     Int?
+  uploaded_at        DateTime       @default(now())
+
+  account            RenewalAccount @relation(fields: [renewal_account_id], references: [id], onDelete: Cascade)
+
+  @@index([renewal_account_id])
+  @@map("renewal_document")
+}
+
+model RenewalFollowUpChannelAction {
+  id                    Int       @id @default(autoincrement())
+  follow_up_task_id     Int
+  renewal_account_id    Int
+  service_instance_id   Int
+  cycle_id              Int
+  reminder_id           Int?
+  channel               String    @db.VarChar(20)
+  action_type           String    @db.VarChar(30)
+  execution_mode        String    @default("AUTOMATIC") @db.VarChar(30)
+  communication_purpose String?   @db.VarChar(30)
+  is_required           Boolean   @default(true)
+  status                String    @default("PENDING")
+  scheduled_at          DateTime?
+  started_at            DateTime?
+  completed_at          DateTime?
+  recipient_contact_id  Int?
+  recipient_address     String?   @db.VarChar(300)
+  template_id           Int?
+  idempotency_key       String    @unique(map: "idempotency_key") @db.VarChar(100)
+  provider_message_id   String?   @db.VarChar(200)
+  outcome_code          String?   @db.VarChar(50)
+  customer_response     String?   @db.Text
+  notes                 String?   @db.Text
+  created_by_id         Int?
+  completed_by_id       Int?
+  is_deleted            Boolean   @default(false)
+  digest_outbox_id      Int?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  follow_up_task        RenewalFollowUpTask @relation(fields: [follow_up_task_id], references: [id])
+  renewal_account       RenewalAccount @relation(fields: [renewal_account_id], references: [id], onDelete: Restrict)
+  service_instance      RenewalServiceInstance @relation(fields: [service_instance_id], references: [id], onDelete: Restrict)
+  cycle                 RenewalCycle @relation(fields: [cycle_id], references: [id], onDelete: Restrict)
+  reminder              RenewalReminder? @relation(fields: [reminder_id], references: [id])
+  recipient_contact     RenewalContact? @relation(fields: [recipient_contact_id], references: [id])
+  template              RenewalNotificationTemplate? @relation(fields: [template_id], references: [id])
+  created_by            User? @relation("ChannelActionCreator", fields: [created_by_id], references: [id])
+  completed_by          User? @relation("ChannelActionCompleter", fields: [completed_by_id], references: [id])
+  outbox_messages       NotificationOutbox[] @relation("ChannelActionOutbox")
+  communication_events  RenewalCommunicationEvent[]
+
+  @@unique([follow_up_task_id, reminder_id])
+  @@unique([follow_up_task_id, channel, action_type, execution_mode])
+  @@index([follow_up_task_id, channel])
+  @@index([status, scheduled_at])
+  @@index([idempotency_key])
+  @@map("renewal_follow_up_channel_action")
+}
+
+model RenewalFollowUpLog {
+  id                  Int                    @id @default(autoincrement())
+  service_instance_id Int
+  reminder_id         Int?
+  outcome_code        String?
+  contacted           Boolean                @default(false)
+  notes               String?                @db.Text
+  customer_response   String?                @db.Text
+  next_follow_up_date DateTime?
+  logged_by_id        Int
+  logged_at           DateTime               @default(now())
+
+  service_instance    RenewalServiceInstance @relation(fields: [service_instance_id], references: [id], onDelete: Cascade)
+  reminder            RenewalReminder?       @relation(fields: [reminder_id], references: [id])
+  logged_by           User                   @relation("FollowUpLogger", fields: [logged_by_id], references: [id])
+
+  @@index([service_instance_id])
+  @@index([logged_at])
+  @@map("renewal_followup_log")
+}
+
+model RenewalFollowUpTask {
+  id                   Int       @id @default(autoincrement())
+  renewal_account_id   Int
+  service_instance_id  Int
+  cycle_id             Int
+  policy_version       Int?
+  follow_up_group_key  String    @db.VarChar(50)
+  scheduled_for        DateTime
+  overall_status       String    @default("PENDING")
+  assigned_user_id     Int?
+  completed_at         DateTime?
+  cancelled_at         DateTime?
+  cancel_reason        String?   @db.VarChar(500)
+  is_deleted           Boolean   @default(false)
+  source_type          String    @default("POLICY_STEP")
+  source_reference_id  Int?
+  migration_confidence String?   @db.VarChar(20)
+  source               String?   @db.VarChar(50)
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  channel_actions      RenewalFollowUpChannelAction[]
+
+  renewal_account      RenewalAccount          @relation(fields: [renewal_account_id], references: [id], onDelete: Restrict)
+  service_instance     RenewalServiceInstance  @relation(fields: [service_instance_id], references: [id], onDelete: Restrict)
+  cycle                RenewalCycle            @relation(fields: [cycle_id], references: [id], onDelete: Restrict)
+  assigned_user        User?                   @relation("FollowUpTaskAssignee", fields: [assigned_user_id], references: [id])
+  communication_events RenewalCommunicationEvent[]
+
+  @@index([scheduled_for, overall_status])
+  @@index([assigned_user_id, overall_status])
+  @@index([cycle_id])
+  @@index([policy_version])
+  @@map("renewal_follow_up_task")
+}
+
+model RenewalInstanceAlertStep {
+  id                  Int                    @id @default(autoincrement())
+  service_instance_id Int
+  step_number         Int                    @default(1)
+  days_before         Int
+  channel             String                 @db.VarChar(30)
+  email_template_id   Int?
+  is_active           Boolean                @default(true)
+  created_at          DateTime               @default(now())
+  updated_at          DateTime               @updatedAt
+
+  service_instance    RenewalServiceInstance @relation(fields: [service_instance_id], references: [id], onDelete: Cascade)
+
+  @@unique([service_instance_id, step_number])
+  @@index([service_instance_id])
+  @@map("renewal_instance_alert_step")
+}
+
+model RenewalNotificationTemplate {
+  id               Int      @id @default(autoincrement())
+  name             String
+  category_code    String?  @db.VarChar(20)
+  channel          String
+  subject          String?
+  body_html        String   @db.Text
+  body_text        String?  @db.Text
+  variables        String?  @db.LongText
+  version          Int      @default(1)
+  editor_json      String?  @db.LongText
+  compiled_html    String?  @db.LongText
+  brand_profile_id Int?
+  is_published     Boolean              @default(false)
+  is_active        Boolean              @default(true)
+  created_at       DateTime             @default(now())
+  updated_at       DateTime             @default(now()) @updatedAt
+
+  brand_profile    RenewalBrandProfile? @relation(fields: [brand_profile_id], references: [id])
+  reminders        RenewalReminder[]
+  channel_actions  RenewalFollowUpChannelAction[]
+
+  @@index([brand_profile_id])
+  @@map("renewal_notification_template")
+}
+
+model RenewalPayment {
+  id              Int          @id @default(autoincrement())
+  cycle_id        Int
+  amount          Decimal      @db.Decimal(12, 2)
+  payment_date    DateTime
+  collected_by_id Int?
+  payment_mode    String?      @db.VarChar(50)
+  reference       String?      @db.VarChar(200)
+  remarks         String?      @db.Text
+  created_at      DateTime     @default(now())
+
+  cycle           RenewalCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+
+  @@index([cycle_id])
+  @@map("renewal_payment")
+}
+
+model RenewalPolicyVersion {
+  id                      Int      @id @default(autoincrement())
+  policy_id               Int
+  version                 Int
+  name_snapshot           String
+  steps_snapshot          String   @db.Text
+  change_summary          String?  @db.VarChar(500)
+  changed_by_id           Int?
+  change_reason           String?  @db.VarChar(500)
+  affected_services_count Int      @default(0)
+  created_at              DateTime @default(now())
+
+  @@unique([policy_id, version])
+  @@map("renewal_policy_version")
+}
+
+model RenewalProvider {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  category_code String?
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  service_instances RenewalServiceInstance[]
+
+  @@map("renewal_provider")
+}
+
+model RenewalProviderSubItem {
+  id          Int      @id @default(autoincrement())
+  provider_id Int
+  name        String
+  type        String   @default("SERVER")
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+
+  @@index([provider_id])
+  @@map("renewal_provider_sub_item")
+}
+
+model RenewalReminder {
+  id                    Int       @id @default(autoincrement())
+  cycle_id              Int
+  step_number           Int
+  offset_days           Int
+  due_date              DateTime
+  action_type           String
+  channel               String
+  recipient_type        String
+  assigned_user_id      Int?
+  template_id           Int?
+  status                String    @default("PENDING")
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @default(now()) @updatedAt
+  completed_at          DateTime?
+  completed_by_id       Int?
+  skipped_at            DateTime?
+  skip_reason           String?   @db.VarChar(500)
+  policy_version        Int?
+  is_mandatory          Boolean   @default(false)
+  escalation_after_days Int?
+  escalate_to_id        Int?
+  escalated             Boolean             @default(false)
+  escalated_at          DateTime?
+
+  cycle                 RenewalCycle        @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  follow_up_logs        RenewalFollowUpLog[]
+  assigned_user         User?               @relation("ReminderAssignee", fields: [assigned_user_id], references: [id])
+  completed_by          User?               @relation("ReminderCompleter", fields: [completed_by_id], references: [id])
+  template              RenewalNotificationTemplate? @relation(fields: [template_id], references: [id])
+  channel_actions       RenewalFollowUpChannelAction[]
+  communication_events  RenewalCommunicationEvent[]
+
+  @@index([due_date, status])
+  @@index([assigned_user_id, status])
+  @@index([cycle_id])
+  @@map("renewal_reminder")
+}
+
+model RenewalReminderPolicy {
+  id                  Int                     @id @default(autoincrement())
+  name                String
+  company_id          Int?
+  service_category_id Int?
+  service_master_id   Int?
+  is_default          Boolean                 @default(false)
+  use_business_days   Boolean                 @default(false)
+  skip_weekends       Boolean                 @default(false)
+  timezone            String                  @default("Asia/Kolkata")
+  version             Int                     @default(1)
+  is_active           Boolean                 @default(true)
+  created_at          DateTime                @default(now())
+  updated_at          DateTime                @default(now()) @updatedAt
+
+  category             RenewalServiceCategory? @relation(fields: [service_category_id], references: [id])
+  service_masters      RenewalServiceMaster[]  @relation("PolicyForService")
+  default_for_services RenewalServiceMaster[]  @relation("DefaultServicePolicy")
+  service_instances    RenewalServiceInstance[]
+  steps                RenewalReminderStep[]
+
+  @@map("renewal_reminder_policy")
+}
+
+model RenewalReminderStep {
+  id                  Int      @id @default(autoincrement())
+  policy_id           Int
+  step_number         Int
+  offset_days         Int
+  relative_to         String   @default("EXPIRY_DATE")
+  action_type         String
+  channel             String
+  recipient_type      String
+  template_id         Int?
+  escalate_after_days Int?
+  escalate_to         String?  @db.VarChar(100)
+  is_mandatory        Boolean  @default(false)
+  is_enabled          Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @default(now()) @updatedAt
+  attach_order_form   Boolean  @default(false)
+  policy              RenewalReminderPolicy @relation(fields: [policy_id], references: [id], onDelete: Cascade)
+
+  @@unique([policy_id, step_number])
+  @@map("renewal_reminder_step")
+}
+
+model RenewalServiceCategory {
+  id         Int      @id @default(autoincrement())
+  name       String
+  code       String
+  color      String?  @default("#6366f1")
+  sort_order Int      @default(0)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+  parent_id  Int?
+  company_id Int?
+
+  parent              RenewalServiceCategory?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children            RenewalServiceCategory[] @relation("CategoryHierarchy")
+  company             Company?                  @relation(fields: [company_id], references: [id])
+  services             RenewalServiceMaster[]   @relation("ServiceMasterCategory")
+  sub_category_services RenewalServiceMaster[]  @relation("ServiceMasterSubCategory")
+  policies             RenewalReminderPolicy[]
+
+  @@index([company_id])
+  @@index([company_id, name])
+  @@unique([company_id, code])
+  @@map("renewal_service_category")
+}
+
+model RenewalServiceInstance {
+  id                  Int       @id @default(autoincrement())
+  renewal_account_id  Int
+  service_master_id   Int
+  identifier          String?
+  provider_id         Int?
+  quantity            Int       @default(1)
+  activation_date     DateTime?
+  expiry_date         DateTime?
+  actual_expiry_date  DateTime?
+  duration_value      Int?      @default(12)
+  duration_unit       String?   @default("months")
+  amount_due          Decimal   @default(0.00) @db.Decimal(12, 2)
+  amc_amount          Decimal   @default(0.00) @db.Decimal(12, 2)
+  support_amount      Decimal   @default(0.00) @db.Decimal(12, 2)
+  assigned_user_id    Int?
+  customer_contact_id Int?
+  reminder_policy_id  Int?
+  override_policy     Boolean   @default(false)
+  status              String    @default("ACTIVE")
+  remarks             String?   @db.Text
+  is_active           Boolean   @default(true)
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @default(now()) @updatedAt
+  email_count         Int?
+  provider_type       String?
+  server_name         String?
+  plan_name           String?
+  billing_term        String?   @default("Yearly")
+  unit_price          Decimal?  @default(0.00) @db.Decimal(12, 2)
+  login_username       String?   // New field for ANGLER requirement
+  service_transaction_type String?  // REGISTRATION | RENEWAL - distinct from lifecycle status
+  order_number             String?  @db.VarChar(100)
+  order_date               DateTime?
+  po_reference             String?  @db.VarChar(200)
+  invoice_number           String?  @db.VarChar(100)
+  invoice_date             DateTime?
+
+  renewal_account      RenewalAccount          @relation(fields: [renewal_account_id], references: [id], onDelete: Cascade)
+  service_master       RenewalServiceMaster    @relation(fields: [service_master_id], references: [id])
+  provider             RenewalProvider?        @relation(fields: [provider_id], references: [id])
+  customer_contact     RenewalContact?         @relation(fields: [customer_contact_id], references: [id])
+  reminder_policy      RenewalReminderPolicy?  @relation(fields: [reminder_policy_id], references: [id])
+  cycles               RenewalCycle[]
+  follow_up_logs       RenewalFollowUpLog[]
+  instance_alert_steps RenewalInstanceAlertStep[]
+
+  assigned_user        User?                   @relation("ServiceAssignee", fields: [assigned_user_id], references: [id])
+  follow_up_tasks      RenewalFollowUpTask[]
+  channel_actions      RenewalFollowUpChannelAction[]
+  communication_events RenewalCommunicationEvent[]
+
+  @@index([renewal_account_id])
+  @@index([order_number])
+  @@index([expiry_date])
+  @@index([status])
+  @@index([assigned_user_id])
+  @@map("renewal_service_instance")
+}
+
+model RenewalServiceMaster {
+  id                         Int      @id @default(autoincrement())
+  name                       String
+  category_id                Int
+  identifier_label           String?  @default("Identifier")
+  requires_identifier        Boolean  @default(true)
+  supports_provider          Boolean  @default(true)
+  requires_provider          Boolean  @default(false)
+  supports_server_name       Boolean  @default(true)
+  requires_server_name       Boolean  @default(false)
+  supports_plan_name         Boolean  @default(true)
+  requires_plan_name         Boolean  @default(false)
+  supports_login_username    Boolean  @default(false)
+  requires_login_username    Boolean  @default(false)
+  supports_quantity          Boolean  @default(false)
+  requires_quantity          Boolean  @default(false)
+  quantity_label             String?  // "No. of Email IDs", "No. of Vehicles", etc.
+  default_duration_value     Int?     @default(12)
+  default_duration_unit      String?  @default("months")
+  supports_amc               Boolean  @default(false)
+  supports_support_package   Boolean  @default(false)
+  default_reminder_policy_id Int?
+  is_active                  Boolean  @default(true)
+  sort_order                 Int      @default(0)
+  created_at                 DateTime @default(now())
+  updated_at                 DateTime @default(now()) @updatedAt
+  sub_category_id            Int?
+  company_id                 Int?
+
+  company        Company?                 @relation(fields: [company_id], references: [id])
+  category       RenewalServiceCategory  @relation("ServiceMasterCategory", fields: [category_id], references: [id])
+  sub_category   RenewalServiceCategory? @relation("ServiceMasterSubCategory", fields: [sub_category_id], references: [id], onDelete: SetNull)
+  default_policy RenewalReminderPolicy?  @relation("DefaultServicePolicy", fields: [default_reminder_policy_id], references: [id])
+  instances      RenewalServiceInstance[]
+  policies       RenewalReminderPolicy[] @relation("PolicyForService")
+  default_prices RenewalServicePrice[]
+  customer_prices RenewalCustomerPrice[]
+
+  @@index([company_id])
+  @@index([company_id, name])
+  @@map("renewal_service_master")
+}
+
+model RenewalServicePlanMaster {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique(map: "name")
+  category_code String?  @default("SERVER")
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+
+  @@map("renewal_service_plan_master")
+}
+
+model RenewalServicePrice {
+  id                Int       @id @default(autoincrement())
+  service_master_id Int
+  base_price        Decimal   @default(0.00) @db.Decimal(12, 2)
+  billing_unit      String    @default("year") @db.VarChar(20)
+  currency          String    @default("INR") @db.VarChar(5)
+  effective_from    DateTime  @db.Date
+  effective_to      DateTime? @db.Date
+  is_current        Boolean   @default(true)
+  notes             String?   @db.Text
+  created_by_id     Int?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  service_master RenewalServiceMaster @relation(fields: [service_master_id], references: [id])
+
+  @@index([service_master_id, is_current])
+  @@map("renewal_service_price")
+}
+
+model RenewalTemplateVersion {
+  id               Int      @id @default(autoincrement())
+  template_id      Int
+  version          Int
+  subject_snapshot String?
+  change_summary   String?  @db.VarChar(500)
+  changed_by_id    Int?
+  change_reason    String?  @db.VarChar(500)
+  created_at       DateTime @default(now())
+  name_snapshot    String
+  body_snapshot    String   @db.Text
+
+  @@unique([template_id, version])
+  @@map("renewal_template_version")
+}
+
+model SmtpConfig {
+  id           Int       @id @default(autoincrement())
+  host         String    @db.VarChar(200)
+  port         Int       @default(587)
+  secure       Int       @default(0) @db.TinyInt
+  username     String    @db.VarChar(300)
+  password_enc String    @db.VarChar(500)
+  from_email   String    @db.VarChar(300)
+  from_name    String    @default("Angler iTech Solutions") @db.VarChar(200)
+  reply_to     String?   @db.VarChar(300)
+  is_active    Int       @default(1) @db.TinyInt
+  tested_at    DateTime?
+  test_result  String?   @db.VarChar(500)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  @@map("smtp_config")
+}
+
+model WhatsappWebSession {
+  id             Int       @id @default(autoincrement())
+  session_name   String    @db.VarChar(100)
+  brand_key      String    @unique(map: "brand_key") @db.VarChar(50)
+  phone_number   String?   @db.VarChar(30)
+  company_id     Int?
+  is_default     Boolean   @default(false)
+  status         String    @default("DISCONNECTED")
+  qr_code_base64 String?   @db.LongText
+  connected_at   DateTime?
+  last_active_at DateTime?
+  error_message  String?   @db.Text
+  is_active      Boolean   @default(true)
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  company        Company?  @relation(fields: [company_id], references: [id])
+
+  @@index([company_id])
+  @@index([status])
+  @@map("whatsapp_web_session")
+}
+
+model WhereFindThem {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique(map: "WhereFindThem_name_key")
+  is_active Boolean @default(true)
+
+  leads     Lead[] @relation("WhereFindThemLeads")
+
+  @@map("wherefindthem")
+}
+
+model collateraltolead {
+  A Int
+  B Int
+
+  @@unique([A, B], map: "_CollateralToLead_AB_unique")
+  @@index([B], map: "_CollateralToLead_B_index")
+  @@map("_collateraltolead")
+}
+
+model managercompanies {
+  A Int
+  B Int
+
+  @@unique([A, B], map: "_ManagerCompanies_AB_unique")
+  @@index([B], map: "_ManagerCompanies_B_index")
+  @@map("_managercompanies")
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  INACTIVE
+}
+
+enum Salutation {
+  Mr
+  Mrs
+  Ms
+  Dr
+}
+
+enum Role {
+  CEO
+  SalesManager
+  SalesPerson
+}
+
+enum MovementType {
+  AUTO
+  MANUAL
+}
+
+enum CallAction {
+  CREATE
+  UPDATE
 }
